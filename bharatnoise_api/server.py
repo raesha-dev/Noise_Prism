@@ -98,7 +98,6 @@ class Settings:
     ws_url: str = "wss://api.vachana.ai/stt/v3/stream"
     live_stop_grace_s: float = 3.0
     live_max_s: float = 300.0
-    live_frame_ms: int = 64
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -117,7 +116,6 @@ class Settings:
         s.ws_url = e("GNANI_WS_URL", s.ws_url)
         s.live_stop_grace_s = float(e("BN_LIVE_STOP_GRACE_S", s.live_stop_grace_s))
         s.live_max_s = float(e("BN_LIVE_MAX_SECONDS", s.live_max_s))
-        s.live_frame_ms = int(e("BN_LIVE_FRAME_MS", s.live_frame_ms))
         return s
 
 
