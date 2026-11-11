@@ -1,4 +1,4 @@
-# BharatNoise proxy contract
+# BharatNoisePrism proxy contract
 
 The workstation is a static browser app. It never holds Gnani credentials. All processing goes through
 a FastAPI or Flask **proxy** that you run; the proxy calls Gnani AI Prisma with its own key.
