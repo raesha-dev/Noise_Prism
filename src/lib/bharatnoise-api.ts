@@ -45,7 +45,7 @@ export type EvaluationReport = {
   dataset?: string | undefined;
   clipCount?: number | undefined;
   measuredAt?: string | undefined;
-  sections: Partial<Record<EvaluationSection, EvaluationRow[]>>;
+  sections: Partial<Record<EvaluationSection, EvaluationRow[] | undefined>>;
 };
 
 export type ProcessOptions = {
@@ -337,9 +337,10 @@ export type LiveMessage =
 /** Parses one JSON text message from WS /live. Unknown messages return null. */
 export function parseLiveMessage(data: unknown): LiveMessage | null {
   if (typeof data !== "string") return null;
-  let body: Record<string, unknown>;
+  type RawLive = { type?: unknown; text?: unknown; final?: unknown; candidate?: unknown; snr_db?: unknown; latency_ms?: unknown; message?: unknown };
+  let body: RawLive;
   try {
-    body = JSON.parse(data) as Record<string, unknown>;
+    body = JSON.parse(data) as RawLive;
   } catch {
     return null;
   }
