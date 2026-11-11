@@ -224,7 +224,7 @@ export function normalizeProcessingResult(raw: unknown, baseUrl = ""): Processin
 
 /** Builds the multipart body for POST /process. */
 export function buildProcessForm(file: File | Blob, fileName: string, options: Omit<ProcessOptions, "signal" | "timeoutMs">): FormData {
-  const candidates = options.mode === "fast" ? options.candidates : options.candidates.filter((id) => id !== "C3" || options.candidates.includes("C3"));
+  const candidates = options.candidates.length ? options.candidates : ["C0"];
   const form = new FormData();
   form.append("file", file, fileName);
   form.append("mode", options.mode);
