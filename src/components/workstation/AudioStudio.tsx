@@ -147,7 +147,7 @@ export function AudioStudio(props: Props) {
                     <span>{statusLabel[track.status]}</span>
                   </button>
                 )}
-                <span className="track-status">{statusLabel[track.status]}{track.hasAudio ? " · audio" : ""}</span>
+                {track.peaks && <span className="track-status">{statusLabel[track.status]}</span>}
               </div>
             </div>
           );
