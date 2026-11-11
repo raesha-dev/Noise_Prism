@@ -19,25 +19,25 @@ separate extended API response with process counts.
 
 `multipart/form-data` fields:
 
-| Field | Contract |
-|---|---|
-| `file` | Audio clip; backend decodes to mono 8 kHz. |
-| `mode` | `fast` or `max`. |
-| `sample_rate`, `channels`, `sample_format` | Must be `8000`, `1`, and `pcm_s16le`. |
-| `asr_provider` | Must be `gnani_prisma`. |
-| `asr_model` | `prisma-v2.5` or `prisma-v3.0`. |
-| `candidates` | Comma-separated candidate IDs. Unavailable optional candidates are omitted. |
-| `selection` | `snr_router` for Fast; `consensus` for Max. |
-| `compare_models` | Max only. `true` transcribes on both models; otherwise only `asr_model` is used. |
-| `reference` | Optional human-verified reference for WER/CER computation. |
+| Field                                      | Contract                                                                         |
+| ------------------------------------------ | -------------------------------------------------------------------------------- |
+| `file`                                     | Audio clip; backend decodes to mono 8 kHz.                                       |
+| `mode`                                     | `fast` or `max`.                                                                 |
+| `sample_rate`, `channels`, `sample_format` | Must be `8000`, `1`, and `pcm_s16le`.                                            |
+| `asr_provider`                             | Must be `gnani_prisma`.                                                          |
+| `asr_model`                                | `prisma-v2.5` or `prisma-v3.0`.                                                  |
+| `candidates`                               | Comma-separated candidate IDs. Unavailable optional candidates are omitted.      |
+| `selection`                                | `snr_router` for Fast; `consensus` for Max.                                      |
+| `compare_models`                           | Max only. `true` transcribes on both models; otherwise only `asr_model` is used. |
+| `reference`                                | Optional human-verified reference for WER/CER computation.                       |
 
 Legacy mode mapping to `/api/jobs`:
 
-| Legacy fields | API job behavior |
-|---|---|
-| `mode=fast` | Queues `fast`: route, guard, and transcribe the chosen candidate once on `asr_model`. |
-| `mode=max`, `compare_models=false` | Queues `compare_all` on `asr_model`, then selects the minimum-edit-distance consensus among that model's successful candidate transcripts. |
-| `mode=max`, `compare_models=true` | Queues `accuracy` on both models, with `asr_model` first. The legacy response contains the requested model's successful candidate transcripts and selection. |
+| Legacy fields                      | API job behavior                                                                                                                                             |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `mode=fast`                        | Queues `fast`: route, guard, and transcribe the chosen candidate once on `asr_model`.                                                                        |
+| `mode=max`, `compare_models=false` | Queues `compare_all` on `asr_model`, then selects the minimum-edit-distance consensus among that model's successful candidate transcripts.                   |
+| `mode=max`, `compare_models=true`  | Queues `accuracy` on both models, with `asr_model` first. The legacy response contains the requested model's successful candidate transcripts and selection. |
 
 The successful response includes `request_id`, `selected_candidate`, `transcription`,
 `candidates`, `analysis`, `evaluation`, `pipeline`, `latency_ms`, `router_fitted`,

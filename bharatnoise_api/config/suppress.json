@@ -4,8 +4,8 @@
   "wiener_gain_floor": 0.18,
   "temporal_smoothing": 0.75,
   "observation_blend": [
-    {"min_snr_db": 15, "lambda": 0.7},
-    {"min_snr_db": 5, "lambda": 0.35},
-    {"min_snr_db": -100, "lambda": 0.15}
+    { "min_snr_db": 15, "lambda": 0.7 },
+    { "min_snr_db": 5, "lambda": 0.35 },
+    { "min_snr_db": -100, "lambda": 0.15 }
   ]
 }

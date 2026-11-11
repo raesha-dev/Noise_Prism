@@ -14,7 +14,8 @@ import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { Toaster } from "@/components/ui/sonner";
 
-const THEME_SCRIPT = "try{if(localStorage.getItem('bharatnoise.theme')==='light')document.documentElement.classList.remove('dark')}catch(e){}";
+const THEME_SCRIPT =
+  "try{if(localStorage.getItem('bharatnoise.theme')==='light')document.documentElement.classList.remove('dark')}catch(e){}";
 
 function NotFoundComponent() {
   return (
@@ -82,9 +83,17 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "BharatNoise | AI Audio Workstation" },
-      { name: "description", content: "Adaptive speech enhancement workstation for Indian telephony ASR with Gnani AI Prisma." },
+      {
+        name: "description",
+        content:
+          "Adaptive speech enhancement workstation for Indian telephony ASR with Gnani AI Prisma.",
+      },
       { property: "og:title", content: "BharatNoise | AI Audio Workstation" },
-      { property: "og:description", content: "Adaptive speech enhancement workstation for Indian telephony ASR with Gnani AI Prisma." },
+      {
+        property: "og:description",
+        content:
+          "Adaptive speech enhancement workstation for Indian telephony ASR with Gnani AI Prisma.",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
@@ -96,7 +105,10 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { rel: "icon", href: "/favicon.ico", type: "image/x-icon" },
       { rel: "preconnect", href: "https://fonts.googleapis.com" },
       { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
-      { rel: "stylesheet", href: "https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap" },
+      {
+        rel: "stylesheet",
+        href: "https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap",
+      },
     ],
   }),
   shellComponent: RootShell,

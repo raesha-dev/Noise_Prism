@@ -26,17 +26,17 @@ The root `server.py` is an entry-point shim. The API files and configuration liv
 
 ## Environment
 
-| Variable | Purpose | Default |
-| --- | --- | --- |
-| `GNANI_API_KEY` | Server-side Prisma credential; required for transcription and live streaming. Never sent to a browser. | unset |
-| `BN_CORS_ORIGINS` | Comma-separated allowed browser origins. | `http://localhost:5173,http://localhost:3000` |
-| `BN_DEMO_TOKEN` | When set, POST routes require `X-Demo-Token`; `/ws/live` requires `?token=`. | unset |
-| `BN_MAX_UPLOAD_MB` | Maximum request audio size. | `5` |
-| `BN_TTL_MINUTES` | Uploaded clip and generated audio lifetime. | `30` |
-| `BN_DAILY_CALL_CAP` | Worst-case Prisma calls reserved when a job is queued. | `300` |
-| `GNANI_WS_URL` | Upstream streaming URL (primarily for local tests). | `wss://api.vachana.ai/stt/v3/stream` |
-| `BN_LIVE_MAX_SECONDS` | Maximum duration of a live connection. | `300` |
-| `BN_LIVE_STOP_GRACE_S` | Time to wait after forwarding stop/commit. | `3` |
+| Variable               | Purpose                                                                                                | Default                                       |
+| ---------------------- | ------------------------------------------------------------------------------------------------------ | --------------------------------------------- |
+| `GNANI_API_KEY`        | Server-side Prisma credential; required for transcription and live streaming. Never sent to a browser. | unset                                         |
+| `BN_CORS_ORIGINS`      | Comma-separated allowed browser origins.                                                               | `http://localhost:5173,http://localhost:3000` |
+| `BN_DEMO_TOKEN`        | When set, POST routes require `X-Demo-Token`; `/ws/live` requires `?token=`.                           | unset                                         |
+| `BN_MAX_UPLOAD_MB`     | Maximum request audio size.                                                                            | `5`                                           |
+| `BN_TTL_MINUTES`       | Uploaded clip and generated audio lifetime.                                                            | `30`                                          |
+| `BN_DAILY_CALL_CAP`    | Worst-case Prisma calls reserved when a job is queued.                                                 | `300`                                         |
+| `GNANI_WS_URL`         | Upstream streaming URL (primarily for local tests).                                                    | `wss://api.vachana.ai/stt/v3/stream`          |
+| `BN_LIVE_MAX_SECONDS`  | Maximum duration of a live connection.                                                                 | `300`                                         |
+| `BN_LIVE_STOP_GRACE_S` | Time to wait after forwarding stop/commit.                                                             | `3`                                           |
 
 `GET /api/config` reports optional dependency availability and every unfitted flag.
 The shipped router and suppression parameter files are placeholders with `fitted: false`.
@@ -45,24 +45,24 @@ The shipped router and suppression parameter files are placeholders with `fitted
 
 JSON errors use `{"error":{"code":"...","message":"..."}}`.
 
-| Route | Request / response |
-| --- | --- |
-| `GET /api/health` | Health and in-memory clip/job counts; no secrets. |
-| `GET /api/config` | Languages, models, modes, candidate availability/reasons, limits, fitted flags, live settings and daily budget. |
-| `GET /api/samples` | Sample metadata from `samples/index.json`, excluding audio paths. Empty until sample metadata is installed. |
-| `POST /api/clips` | Multipart `file` **or** `sample_id`, optional `language` and `reference`; returns `clip_id`, real analysis, variants and TTL. |
-| `GET /api/clips/{id}` | Clip metadata and analysis. |
-| `DELETE /api/clips/{id}` | Deletes the clip; returns 204. |
-| `GET /api/clips/{id}/audio?variant=C0` | Candidate audio as 8 kHz PCM WAV. |
-| `GET /api/clips/{id}/spectrogram.png?variant=C0` | Measured 0–4 kHz spectrogram PNG. |
-| `POST /api/jobs` | JSON `{"clip_id":"...","mode":"raw|fast|compare_all|accuracy","language":"hi-IN","model":"v2.5","reference":"..."}`; returns 202 and `job_id`. |
-| `GET /api/jobs/{id}` | Polls `queued`, `running`, `done` or `error`, including measured hypotheses and scores. |
-| `POST /api/score` | JSON `{"reference":"...","hypothesis":"..."}`; returns benchmark-normalized WER/CER, S/D/I and word alignment. |
-| `GET /api/results` | Tags and row counts for existing results CSVs. |
-| `GET /api/results/compare?a=C0&b=C1&by=language&n_boot=2000` | Paired CSV comparison; deltas are B minus A. `by` may be `group` or `language`. |
-| `GET /api/results/{tag}/rows?group=traffic_snr0&limit=200` | Filtered benchmark CSV rows. Tags are restricted to safe filename characters. |
-| `GET /api/results/tables` | Aggregate CSV rows; returns 404 until all aggregate files have been produced. |
-| `WS /ws/live?language=hi-IN&model=v2.5&variant=C1` | Gnani streaming proxy. Browser sends PCM16 bytes and optional `{"type":"commit"}` / `{"type":"stop"}` frames. |
+| Route                                                        | Request / response                                                                                                            |
+| ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/health`                                            | Health and in-memory clip/job counts; no secrets.                                                                             |
+| `GET /api/config`                                            | Languages, models, modes, candidate availability/reasons, limits, fitted flags, live settings and daily budget.               |
+| `GET /api/samples`                                           | Sample metadata from `samples/index.json`, excluding audio paths. Empty until sample metadata is installed.                   |
+| `POST /api/clips`                                            | Multipart `file` **or** `sample_id`, optional `language` and `reference`; returns `clip_id`, real analysis, variants and TTL. |
+| `GET /api/clips/{id}`                                        | Clip metadata and analysis.                                                                                                   |
+| `DELETE /api/clips/{id}`                                     | Deletes the clip; returns 204.                                                                                                |
+| `GET /api/clips/{id}/audio?variant=C0`                       | Candidate audio as 8 kHz PCM WAV.                                                                                             |
+| `GET /api/clips/{id}/spectrogram.png?variant=C0`             | Measured 0–4 kHz spectrogram PNG.                                                                                             |
+| `POST /api/jobs`                                             | JSON `{"clip_id":"...","mode":"raw                                                                                            | fast | compare_all | accuracy","language":"hi-IN","model":"v2.5","reference":"..."}`; returns 202 and `job_id`. |
+| `GET /api/jobs/{id}`                                         | Polls `queued`, `running`, `done` or `error`, including measured hypotheses and scores.                                       |
+| `POST /api/score`                                            | JSON `{"reference":"...","hypothesis":"..."}`; returns benchmark-normalized WER/CER, S/D/I and word alignment.                |
+| `GET /api/results`                                           | Tags and row counts for existing results CSVs.                                                                                |
+| `GET /api/results/compare?a=C0&b=C1&by=language&n_boot=2000` | Paired CSV comparison; deltas are B minus A. `by` may be `group` or `language`.                                               |
+| `GET /api/results/{tag}/rows?group=traffic_snr0&limit=200`   | Filtered benchmark CSV rows. Tags are restricted to safe filename characters.                                                 |
+| `GET /api/results/tables`                                    | Aggregate CSV rows; returns 404 until all aggregate files have been produced.                                                 |
+| `WS /ws/live?language=hi-IN&model=v2.5&variant=C1`           | Gnani streaming proxy. Browser sends PCM16 bytes and optional `{"type":"commit"}` / `{"type":"stop"}` frames.                 |
 
 ### Clip upload
 
@@ -91,15 +91,15 @@ each available candidate on both models and applies minimum-Bayes-risk consensus
 
 The browser adapter in `src/lib/bharatnoise-api.ts` uses these compatibility routes:
 
-* `GET /health` → `{"status":"ok","gnani_configured":false}` when no key is present.
-* `POST /process` accepts the UI multipart fields (`file`, `mode`, `sample_rate`,
+- `GET /health` → `{"status":"ok","gnani_configured":false}` when no key is present.
+- `POST /process` accepts the UI multipart fields (`file`, `mode`, `sample_rate`,
   `channels`, `sample_format`, `asr_provider`, `asr_model`, `candidates`, `selection`,
   and `compare_models`). It returns snake_case `selected_candidate`, `transcription`,
   `candidates` with playable `audio_url` and measured peaks, analysis, pipeline stages,
   and timing. WER/CER are included only when a reference was supplied.
-* `GET /evaluation` exposes generated aggregate CSVs in the UI's evaluation shape; it
+- `GET /evaluation` exposes generated aggregate CSVs in the UI's evaluation shape; it
   returns 404 rather than sample metrics before aggregate results exist.
-* `WS /live` accepts the browser's initial `config` JSON frame and relays upstream
+- `WS /live` accepts the browser's initial `config` JSON frame and relays upstream
   messages unchanged. It adds the required Gnani upgrade headers itself.
 
 The `/ws/live` WebSocket contract is documented in its route docstring and follows

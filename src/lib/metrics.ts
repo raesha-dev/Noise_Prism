@@ -15,7 +15,11 @@ function editDistance<T>(a: T[], b: T[]): number {
     const current = [i];
     for (let j = 1; j <= b.length; j += 1) {
       const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      current[j] = Math.min((previous[j] ?? 0) + 1, (current[j - 1] ?? 0) + 1, (previous[j - 1] ?? 0) + cost);
+      current[j] = Math.min(
+        (previous[j] ?? 0) + 1,
+        (current[j - 1] ?? 0) + 1,
+        (previous[j - 1] ?? 0) + cost,
+      );
     }
     previous = current;
   }
@@ -48,15 +52,20 @@ export function diffWords(base: string, hypothesis: string): DiffToken[] {
   const table = Array.from({ length: a.length + 1 }, () => new Array<number>(b.length + 1).fill(0));
   for (let i = a.length - 1; i >= 0; i -= 1) {
     for (let j = b.length - 1; j >= 0; j -= 1) {
-      table[i]![j] = key(a[i]!) === key(b[j]!) ? table[i + 1]![j + 1]! + 1 : Math.max(table[i + 1]![j]!, table[i]![j + 1]!);
+      table[i]![j] =
+        key(a[i]!) === key(b[j]!)
+          ? table[i + 1]![j + 1]! + 1
+          : Math.max(table[i + 1]![j]!, table[i]![j + 1]!);
     }
   }
   const tokens: DiffToken[] = [];
-  let i = 0, j = 0;
+  let i = 0,
+    j = 0;
   while (j < b.length) {
     if (i < a.length && key(a[i]!) === key(b[j]!)) {
       tokens.push({ word: b[j]!, kind: "same" });
-      i += 1; j += 1;
+      i += 1;
+      j += 1;
     } else if (i < a.length && table[i + 1]![j]! >= table[i]![j + 1]!) {
       i += 1;
     } else {
@@ -68,4 +77,6 @@ export function diffWords(base: string, hypothesis: string): DiffToken[] {
 }
 
 export const formatPercent = (value?: number | null, digits = 2) =>
-  value === undefined || value === null || !Number.isFinite(value) ? "—" : `${(value * 100).toFixed(digits)}%`;
+  value === undefined || value === null || !Number.isFinite(value)
+    ? "—"
+    : `${(value * 100).toFixed(digits)}%`;

@@ -1,7 +1,14 @@
 node_modules
+.venv
 dist
 .output
 .vinxi
+data
+results_mock
+workdir
+cache
+__pycache__
+.pytest_cache
 pnpm-lock.yaml
 package-lock.json
 bun.lock

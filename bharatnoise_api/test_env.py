@@ -10,9 +10,16 @@ import numpy as np
 import soundfile as sf
 
 from . import env as env_loader
+from .server import Settings
 
 PACKAGE = Path(__file__).resolve().parent
 ROOT = PACKAGE.parent
+
+
+def test_default_cors_includes_the_vite_development_origin():
+    settings = Settings()
+
+    assert "http://127.0.0.1:8080" in settings.cors_origins
 
 
 def test_env_files_load_in_order_and_process_environment_wins(tmp_path, monkeypatch):

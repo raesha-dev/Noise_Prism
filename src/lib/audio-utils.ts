@@ -20,7 +20,8 @@ export function computePeaks(samples: Float32Array, bins = 320): number[] {
     const start = Math.floor(bin * size);
     const end = Math.max(start + 1, Math.floor((bin + 1) * size));
     let peak = 0;
-    for (let i = start; i < end && i < samples.length; i += 1) peak = Math.max(peak, Math.abs(samples[i] ?? 0));
+    for (let i = start; i < end && i < samples.length; i += 1)
+      peak = Math.max(peak, Math.abs(samples[i] ?? 0));
     peaks.push(peak);
     max = Math.max(max, peak);
   }
@@ -31,7 +32,10 @@ const toDb = (power: number) => 10 * Math.log10(power + 1e-12);
 
 function fftMagnitudes(frame: Float32Array): Float32Array {
   const n = frame.length;
-  const re = Float32Array.from(frame, (value, i) => value * (0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (n - 1))));
+  const re = Float32Array.from(
+    frame,
+    (value, i) => value * (0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (n - 1))),
+  );
   const im = new Float32Array(n);
   for (let i = 1, j = 0; i < n; i += 1) {
     let bit = n >> 1;
@@ -45,12 +49,16 @@ function fftMagnitudes(frame: Float32Array): Float32Array {
     const angle = (-2 * Math.PI) / len;
     for (let i = 0; i < n; i += len) {
       for (let k = 0; k < len / 2; k += 1) {
-        const wr = Math.cos(angle * k), wi = Math.sin(angle * k);
-        const a = i + k, b = i + k + len / 2;
+        const wr = Math.cos(angle * k),
+          wi = Math.sin(angle * k);
+        const a = i + k,
+          b = i + k + len / 2;
         const tr = (re[b] ?? 0) * wr - (im[b] ?? 0) * wi;
         const ti = (re[b] ?? 0) * wi + (im[b] ?? 0) * wr;
-        re[b] = (re[a] ?? 0) - tr; im[b] = (im[a] ?? 0) - ti;
-        re[a] = (re[a] ?? 0) + tr; im[a] = (im[a] ?? 0) + ti;
+        re[b] = (re[a] ?? 0) - tr;
+        im[b] = (im[a] ?? 0) - ti;
+        re[a] = (re[a] ?? 0) + tr;
+        im[a] = (im[a] ?? 0) + ti;
       }
     }
   }
@@ -61,7 +69,12 @@ function fftMagnitudes(frame: Float32Array): Float32Array {
  * Rough energy-based statistics computed in the browser. These are estimates for orientation,
  * not the service's VAD/SNR measurement.
  */
-export function analyzeSignal(samples: Float32Array, sampleRate: number, vadBinCount = 48, bands = 32): SignalStats {
+export function analyzeSignal(
+  samples: Float32Array,
+  sampleRate: number,
+  vadBinCount = 48,
+  bands = 32,
+): SignalStats {
   const frameSize = Math.max(1, Math.round(sampleRate * 0.02));
   const powers: number[] = [];
   for (let start = 0; start + frameSize <= samples.length; start += frameSize) {
@@ -71,7 +84,16 @@ export function analyzeSignal(samples: Float32Array, sampleRate: number, vadBinC
   }
   const durationSec = samples.length / sampleRate;
   if (powers.length === 0) {
-    return { durationSec, snrDb: 0, noiseFloorDb: -120, speechEnergyDb: -120, speechRatio: 0, vadBins: Array(vadBinCount).fill(false), vadSegments: [], spectrum: Array(bands).fill(0) };
+    return {
+      durationSec,
+      snrDb: 0,
+      noiseFloorDb: -120,
+      speechEnergyDb: -120,
+      speechRatio: 0,
+      vadBins: Array(vadBinCount).fill(false),
+      vadSegments: [],
+      spectrum: Array(bands).fill(0),
+    };
   }
   const sortedDb = powers.map(toDb).sort((a, b) => a - b);
   const floorDb = sortedDb[Math.floor(sortedDb.length * 0.15)] ?? -120;
@@ -79,7 +101,8 @@ export function analyzeSignal(samples: Float32Array, sampleRate: number, vadBinC
   const speechFlags = powers.map((power) => toDb(power) > threshold);
   const speechPowers = powers.filter((_, i) => speechFlags[i]);
   const noisePowers = powers.filter((_, i) => !speechFlags[i]);
-  const mean = (values: number[]) => (values.length ? values.reduce((a, b) => a + b, 0) / values.length : 1e-12);
+  const mean = (values: number[]) =>
+    values.length ? values.reduce((a, b) => a + b, 0) / values.length : 1e-12;
   const speechEnergyDb = toDb(mean(speechPowers));
   const noiseFloorDb = toDb(mean(noisePowers.length ? noisePowers : [Math.min(...powers)]));
 
@@ -111,7 +134,7 @@ export function analyzeSignal(samples: Float32Array, sampleRate: number, vadBinC
     mags.forEach((value, i) => (spectrumSum[i] = (spectrumSum[i] ?? 0) + value));
   }
   const nyquist = sampleRate / 2;
-  const maxBin = Math.floor(((Math.min(4000, nyquist)) / nyquist) * (fftSize / 2));
+  const maxBin = Math.floor((Math.min(4000, nyquist) / nyquist) * (fftSize / 2));
   const bandDb = Array.from({ length: bands }, (_, band) => {
     const start = Math.floor((band / bands) * maxBin);
     const end = Math.max(start + 1, Math.floor(((band + 1) / bands) * maxBin));
@@ -138,19 +161,37 @@ export function analyzeSignal(samples: Float32Array, sampleRate: number, vadBinC
 export function readWavHeader(bytes: ArrayBuffer): { sampleRate: number; channels: number } | null {
   if (bytes.byteLength < 44) return null;
   const view = new DataView(bytes);
-  const tag = (offset: number) => String.fromCharCode(view.getUint8(offset), view.getUint8(offset + 1), view.getUint8(offset + 2), view.getUint8(offset + 3));
+  const tag = (offset: number) =>
+    String.fromCharCode(
+      view.getUint8(offset),
+      view.getUint8(offset + 1),
+      view.getUint8(offset + 2),
+      view.getUint8(offset + 3),
+    );
   if (tag(0) !== "RIFF" || tag(8) !== "WAVE") return null;
   let offset = 12;
   while (offset + 8 <= bytes.byteLength) {
     const size = view.getUint32(offset + 4, true);
-    if (tag(offset) === "fmt " && offset + 16 <= bytes.byteLength) return { channels: view.getUint16(offset + 10, true), sampleRate: view.getUint32(offset + 12, true) };
+    if (tag(offset) === "fmt " && offset + 16 <= bytes.byteLength)
+      return {
+        channels: view.getUint16(offset + 10, true),
+        sampleRate: view.getUint32(offset + 12, true),
+      };
     offset += 8 + size + (size % 2);
   }
   return null;
 }
 
-export async function decodeToMono(file: Blob): Promise<{ samples: Float32Array; sampleRate: number; sourceRate?: number | undefined; channels: number; duration: number }> {
-  const AudioCtx = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+export async function decodeToMono(file: Blob): Promise<{
+  samples: Float32Array;
+  sampleRate: number;
+  sourceRate?: number | undefined;
+  channels: number;
+  duration: number;
+}> {
+  const AudioCtx =
+    window.AudioContext ??
+    (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
   const context = new AudioCtx();
   try {
     const bytes = await file.arrayBuffer();
@@ -159,10 +200,17 @@ export async function decodeToMono(file: Blob): Promise<{ samples: Float32Array;
     const mono = new Float32Array(buffer.length);
     for (let c = 0; c < buffer.numberOfChannels; c += 1) {
       const data = buffer.getChannelData(c);
-      for (let i = 0; i < data.length; i += 1) mono[i] = (mono[i] ?? 0) + (data[i] ?? 0) / buffer.numberOfChannels;
+      for (let i = 0; i < data.length; i += 1)
+        mono[i] = (mono[i] ?? 0) + (data[i] ?? 0) / buffer.numberOfChannels;
     }
     // decodeAudioData resamples to the device rate; report the file's own rate when the header tells us.
-    return { samples: mono, sampleRate: buffer.sampleRate, sourceRate: header?.sampleRate, channels: header?.channels ?? buffer.numberOfChannels, duration: buffer.duration };
+    return {
+      samples: mono,
+      sampleRate: buffer.sampleRate,
+      sourceRate: header?.sampleRate,
+      channels: header?.channels ?? buffer.numberOfChannels,
+      duration: buffer.duration,
+    };
   } finally {
     void context.close().catch(() => undefined);
   }
@@ -175,7 +223,8 @@ export function encodeWav(samples: Float32Array, sampleRate: number): Blob {
 export function encodeWavBuffer(samples: Float32Array, sampleRate: number): ArrayBuffer {
   const buffer = new ArrayBuffer(44 + samples.length * 2);
   const view = new DataView(buffer);
-  const write = (offset: number, text: string) => [...text].forEach((ch, i) => view.setUint8(offset + i, ch.charCodeAt(0)));
+  const write = (offset: number, text: string) =>
+    [...text].forEach((ch, i) => view.setUint8(offset + i, ch.charCodeAt(0)));
   write(0, "RIFF");
   view.setUint32(4, 36 + samples.length * 2, true);
   write(8, "WAVE");
@@ -189,7 +238,9 @@ export function encodeWavBuffer(samples: Float32Array, sampleRate: number): Arra
   view.setUint16(34, 16, true);
   write(36, "data");
   view.setUint32(40, samples.length * 2, true);
-  samples.forEach((value, i) => view.setInt16(44 + i * 2, Math.max(-32768, Math.min(32767, Math.round(value * 32767))), true));
+  samples.forEach((value, i) =>
+    view.setInt16(44 + i * 2, Math.max(-32768, Math.min(32767, Math.round(value * 32767))), true),
+  );
   return buffer;
 }
 
@@ -225,15 +276,24 @@ export function makeSampleClip(kind: SampleKind, durationSec = 14.7): File {
     for (let h = 1; h <= 14; h += 1) {
       const freq = f0 * h;
       if (freq > 3400) break;
-      const env = Math.exp(-(((freq - 500 * formant) / 350) ** 2)) + 0.6 * Math.exp(-(((freq - 1500 * formant) / 500) ** 2)) + 0.12;
+      const env =
+        Math.exp(-(((freq - 500 * formant) / 350) ** 2)) +
+        0.6 * Math.exp(-(((freq - 1500 * formant) / 500) ** 2)) +
+        0.12;
       voice += (env * Math.sin(phase * h)) / h;
     }
     const speech = 0.32 * voice * syllable * phraseOn;
     const white = rand() * 2 - 1;
     brown = (brown + 0.02 * white) / 1.02;
     let noise = 0;
-    if (kind === "call") noise = 1.6 * brown + 0.05 * white + 0.035 * Math.sin(2 * Math.PI * 50 * t) + (Math.sin(2 * Math.PI * 0.09 * t) > 0.97 ? 0.08 * Math.sin(2 * Math.PI * 420 * t) : 0);
-    if (kind === "street") noise = 0.09 * white * (0.6 + 0.4 * Math.sin(2 * Math.PI * 3.3 * t + 1)) + 0.8 * brown;
+    if (kind === "call")
+      noise =
+        1.6 * brown +
+        0.05 * white +
+        0.035 * Math.sin(2 * Math.PI * 50 * t) +
+        (Math.sin(2 * Math.PI * 0.09 * t) > 0.97 ? 0.08 * Math.sin(2 * Math.PI * 420 * t) : 0);
+    if (kind === "street")
+      noise = 0.09 * white * (0.6 + 0.4 * Math.sin(2 * Math.PI * 3.3 * t + 1)) + 0.8 * brown;
     if (kind === "quiet") noise = 0.006 * white;
     out[i] = Math.max(-1, Math.min(1, speech + noise));
   }

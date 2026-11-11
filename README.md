@@ -29,9 +29,9 @@ Submission for the **Noise Canceller Award**, [Great Indian AI Internship Challe
 Word error rate (WER, lower is better) with Gnani Prisma on **real telephone audio**, comparing the raw call against BharatNoise. Numbers come from `results/final_results.csv`; the 95% interval is a paired bootstrap over clips.
 
 | Prisma model | Raw audio WER | BharatNoise WER | Change (95% CI) | Clips better / same / worse |
-|---|---|---|---|---|
-| v2.5 | TBD | TBD | TBD | TBD |
-| v3.0 | TBD | TBD | TBD | TBD |
+| ------------ | ------------- | --------------- | --------------- | --------------------------- |
+| v2.5         | TBD           | TBD             | TBD             | TBD                         |
+| v3.0         | TBD           | TBD             | TBD             | TBD                         |
 
 Test set: TBD clips, TBD languages, TBD noise conditions. API run-to-run noise floor on identical audio: TBD WER points (changes smaller than this are not treated as real).
 
@@ -73,12 +73,12 @@ flowchart LR
 
 **Candidate versions of each clip**
 
-| ID | What it is | Why it exists |
-|---|---|---|
-| C0 | Original audio | The baseline every other version must beat |
-| C1 | Hygiene only: DC removal, 300-3400 Hz band-limit, mains-hum notch, gain normalisation | Cheap and rarely harmful |
-| C2 | Conservative Wiener / spectral-gating suppression, blended with the original: `y = enhanced + lambda * original` | Keeps speech cues that aggressive suppression destroys |
-| C3 | Neural enhancement (DeepFilterNet, resampled 8 -> 48 -> 8 kHz) | Strongest cleaning; used for listening and tested as an ASR input |
+| ID  | What it is                                                                                                       | Why it exists                                                     |
+| --- | ---------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| C0  | Original audio                                                                                                   | The baseline every other version must beat                        |
+| C1  | Hygiene only: DC removal, 300-3400 Hz band-limit, mains-hum notch, gain normalisation                            | Cheap and rarely harmful                                          |
+| C2  | Conservative Wiener / spectral-gating suppression, blended with the original: `y = enhanced + lambda * original` | Keeps speech cues that aggressive suppression destroys            |
+| C3  | Neural enhancement (DeepFilterNet, resampled 8 -> 48 -> 8 kHz)                                                   | Strongest cleaning; used for listening and tested as an ASR input |
 
 **Speech-preservation guard.** On speech frames (found with a voice-activity detector), the guard compares the original and enhanced audio in the telephone band. If the enhancer removed too much speech energy or distorted the spectrum, it raises the blend weight or falls back to C1. We report whether the guard's score actually tracks the change in WER (see Findings).
 
@@ -86,19 +86,22 @@ flowchart LR
 
 - **Fast** (1 API call): thresholds on the estimated SNR pick one version. Thresholds are fitted on the development set only.
 - **Accuracy** (several API calls): transcribe C0, C1 and C2 (and optionally both Prisma models), then keep the transcript closest to all the others, measured by pairwise word edit distance. This needs no confidence scores, which Prisma's REST API does not return. It costs more calls and latency; we report both.
+
 <!-- CUT IF NOT SHIPPED -->
+
 - **Live** (demo only): streams audio to Prisma over WebSocket in exact 64 ms frames (512 samples at 8 kHz) through a backend proxy, using the telephony VAD preset.
+
 <!-- END CUT -->
 
 **Design note: why not phase inversion?** Anti-noise cancellation, as in noise-cancelling headphones, needs a reference noise signal at the listener. A single recorded call has no such reference, so the noise has to be estimated, and no estimate is perfect. We therefore use gain-based suppression with blending and measure the outcome, rather than claiming physical cancellation.
 
 ## Gnani models used
 
-| Gnani technology | How we use it |
-|---|---|
-| **Prisma v2.5** (primary) | REST transcription for the benchmark; explicit `model=prisma-v2.5`, `format=verbatim` |
-| **Prisma v3.0** | Same benchmark as a second model; language detection and mixed-language handling where relevant |
-| Realtime streaming API | Live demo path (if shipped) |
+| Gnani technology          | How we use it                                                                                   |
+| ------------------------- | ----------------------------------------------------------------------------------------------- |
+| **Prisma v2.5** (primary) | REST transcription for the benchmark; explicit `model=prisma-v2.5`, `format=verbatim`           |
+| **Prisma v3.0**           | Same benchmark as a second model; language detection and mixed-language handling where relevant |
+| Realtime streaming API    | Live demo path (if shipped)                                                                     |
 
 Languages tested: FILL (e.g. Hindi `hi-IN`, Kannada `kn-IN`, Indian English `en-IN`). Prisma supports ten Indian-language codes in total, and the harness takes the language per clip from a manifest.
 
@@ -106,11 +109,11 @@ Languages tested: FILL (e.g. Hindi `hi-IN`, Kannada `kn-IN`, Indian English `en-
 
 **Data**
 
-| Set | Source | Purpose |
-|---|---|---|
-| Real telephone | FILL: e.g. a subset of [GramVaani Hindi](https://openslr.org/resources/118/about.html), 8 kHz-native clips, 15 s or shorter | Headline result on genuinely noisy telephone speech |
-| Controlled | FILL: e.g. [IndicVoices](https://huggingface.co/datasets/ai4bharat/IndicVoices) validation clips, mixed with noise at 0, 5 and 10 dB SNR, then passed through a telephone codec | Known clean references; clean SNR and noise-type breakdowns |
-| Noise | FILL: our own street and traffic recordings, plus public noise corpora (licences checked) | Indian traffic and horn noise |
+| Set            | Source                                                                                                                                                                          | Purpose                                                     |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| Real telephone | FILL: e.g. a subset of [GramVaani Hindi](https://openslr.org/resources/118/about.html), 8 kHz-native clips, 15 s or shorter                                                     | Headline result on genuinely noisy telephone speech         |
+| Controlled     | FILL: e.g. [IndicVoices](https://huggingface.co/datasets/ai4bharat/IndicVoices) validation clips, mixed with noise at 0, 5 and 10 dB SNR, then passed through a telephone codec | Known clean references; clean SNR and noise-type breakdowns |
+| Noise          | FILL: our own street and traffic recordings, plus public noise corpora (licences checked)                                                                                       | Indian traffic and horn noise                               |
 
 **Protocol**
 
@@ -125,39 +128,39 @@ Languages tested: FILL (e.g. Hindi `hi-IN`, Kannada `kn-IN`, Indian English `en-
 
 **By noise type (controlled set, Prisma v2.5)**
 
-| Noise | Raw WER | Best BharatNoise WER | Change (95% CI) |
-|---|---|---|---|
-| Traffic / horns | TBD | TBD | TBD |
-| Crowd / babble | TBD | TBD | TBD |
-| Indoor (fan, TV) | TBD | TBD | TBD |
-| Channel damage | TBD | TBD | TBD |
+| Noise            | Raw WER | Best BharatNoise WER | Change (95% CI) |
+| ---------------- | ------- | -------------------- | --------------- |
+| Traffic / horns  | TBD     | TBD                  | TBD             |
+| Crowd / babble   | TBD     | TBD                  | TBD             |
+| Indoor (fan, TV) | TBD     | TBD                  | TBD             |
+| Channel damage   | TBD     | TBD                  | TBD             |
 
 **By SNR**
 
-| SNR | Raw WER | BharatNoise WER | Change (95% CI) |
-|---|---|---|---|
-| 10 dB | TBD | TBD | TBD |
-| 5 dB | TBD | TBD | TBD |
-| 0 dB | TBD | TBD | TBD |
+| SNR   | Raw WER | BharatNoise WER | Change (95% CI) |
+| ----- | ------- | --------------- | --------------- |
+| 10 dB | TBD     | TBD             | TBD             |
+| 5 dB  | TBD     | TBD             | TBD             |
+| 0 dB  | TBD     | TBD             | TBD             |
 
 **Ablation: what contributes**
 
-| System | WER | Change vs C0 (95% CI) |
-|---|---|---|
-| C0 original | TBD | n/a |
-| C1 hygiene only | TBD | TBD |
-| C2 blended suppression | TBD | TBD |
-| C3 neural only | TBD | TBD |
-| Fast router | TBD | TBD |
-| Accuracy mode (consensus) | TBD | TBD |
-| Fast router, guard off | TBD | TBD |
+| System                    | WER | Change vs C0 (95% CI) |
+| ------------------------- | --- | --------------------- |
+| C0 original               | TBD | n/a                   |
+| C1 hygiene only           | TBD | TBD                   |
+| C2 blended suppression    | TBD | TBD                   |
+| C3 neural only            | TBD | TBD                   |
+| Fast router               | TBD | TBD                   |
+| Accuracy mode (consensus) | TBD | TBD                   |
+| Fast router, guard off    | TBD | TBD                   |
 
 **Latency**
 
-| Mode | p50 | p95 | API calls per clip |
-|---|---|---|---|
-| Fast | TBD | TBD | 1 |
-| Accuracy | TBD | TBD | TBD |
+| Mode     | p50 | p95 | API calls per clip |
+| -------- | --- | --- | ------------------ |
+| Fast     | TBD | TBD | 1                  |
+| Accuracy | TBD | TBD | TBD                |
 
 ### Findings
 
@@ -177,11 +180,11 @@ FILL: three to five sentences written from your numbers. Say plainly where each 
 
 No real customer calls, phone numbers, account numbers, Aadhaar, PAN or other personal data are used anywhere in this project, in line with the challenge FAQ. Evaluation uses public research corpora (licences below), clips we synthesised, and scripted staged calls recorded by the team with consent. Public-corpus audio is **not redistributed** in this repository; scripts download it from the original source.
 
-| Corpus | Licence / terms | Notes |
-|---|---|---|
-| FILL: GramVaani | Research use free; commercial use needs an agreement with Gram Vaani | Check terms before reuse |
-| FILL: IndicVoices | CC BY 4.0 | |
-| FILL: noise sources | Per-source licence | Own recordings are ours |
+| Corpus              | Licence / terms                                                      | Notes                    |
+| ------------------- | -------------------------------------------------------------------- | ------------------------ |
+| FILL: GramVaani     | Research use free; commercial use needs an agreement with Gram Vaani | Check terms before reuse |
+| FILL: IndicVoices   | CC BY 4.0                                                            |                          |
+| FILL: noise sources | Per-source licence                                                   | Own recordings are ours  |
 
 ## Reproduce it
 
@@ -210,12 +213,12 @@ Calls are strictly serial because Gnani's API limits accounts to one active requ
 
 ### Every claim, and where to check it
 
-| Claim | File | Command |
-|---|---|---|
-| Headline WER change on real telephone audio | `results/final_results.csv` | FILL |
-| Prisma run-to-run noise floor | `results/real_C0_v25.csv`, `results/real_C0_v25_run1.csv` | `python compare.py` on the two files |
-| Ablation table | `results/ablation_results.csv` | FILL |
-| Latency | FILL | FILL |
+| Claim                                       | File                                                      | Command                              |
+| ------------------------------------------- | --------------------------------------------------------- | ------------------------------------ |
+| Headline WER change on real telephone audio | `results/final_results.csv`                               | FILL                                 |
+| Prisma run-to-run noise floor               | `results/real_C0_v25.csv`, `results/real_C0_v25_run1.csv` | `python compare.py` on the two files |
+| Ablation table                              | `results/ablation_results.csv`                            | FILL                                 |
+| Latency                                     | FILL                                                      | FILL                                 |
 
 ## Repository layout
 
@@ -242,8 +245,8 @@ FILL: one paragraph on what the demo shows (original versus cleaned audio, trans
 ## Team and contributions
 
 | Name | Contribution |
-|---|---|
-| FILL | FILL |
+| ---- | ------------ |
+| FILL | FILL         |
 
 ## Roadmap
 

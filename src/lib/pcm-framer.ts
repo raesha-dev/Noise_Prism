@@ -16,7 +16,8 @@ export class Pcm16Resampler {
   private carry = new Float32Array(0);
 
   constructor(inputRate: number, outputRate = LIVE_SAMPLE_RATE) {
-    if (inputRate < outputRate) throw new Error("Input sample rate must be at least the output rate.");
+    if (inputRate < outputRate)
+      throw new Error("Input sample rate must be at least the output rate.");
     this.ratio = inputRate / outputRate;
   }
 

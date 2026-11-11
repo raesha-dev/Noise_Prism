@@ -83,7 +83,14 @@ class Settings:
     samples_dir: Path = ROOT / "samples"
     config_dir: Path = ROOT / "config"
     web_dir: Path = ROOT / "web"
-    cors_origins: list = field(default_factory=lambda: ["http://localhost:5173", "http://localhost:3000"])
+    cors_origins: list = field(
+        default_factory=lambda: [
+            "http://localhost:5173",
+            "http://localhost:3000",
+            "http://localhost:8080",
+            "http://127.0.0.1:8080",
+        ]
+    )
     max_upload_mb: float = 5.0
     ttl_minutes: float = 30.0
     daily_call_cap: int = 300

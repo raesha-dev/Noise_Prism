@@ -6,10 +6,20 @@
  */
 import { makeLiveSocketUrl, parseLiveMessage, type LiveMessage } from "./bharatnoise-api";
 import {
-  LIVE_CANDIDATES, LIVE_FRAME_BYTES, LIVE_FRAME_INTERVAL_MS, LIVE_SAMPLE_RATE, Pcm16Resampler, PcmFrameQueue,
+  LIVE_CANDIDATES,
+  LIVE_FRAME_BYTES,
+  LIVE_FRAME_INTERVAL_MS,
+  LIVE_SAMPLE_RATE,
+  Pcm16Resampler,
+  PcmFrameQueue,
 } from "./pcm-framer";
 
-export type LiveStats = { framesSent: number; bufferedFrames: number; droppedFrames: number; levelDb: number };
+export type LiveStats = {
+  framesSent: number;
+  bufferedFrames: number;
+  droppedFrames: number;
+  levelDb: number;
+};
 
 export type LiveHandlers = {
   onOpen: () => void;
@@ -20,10 +30,19 @@ export type LiveHandlers = {
 
 export type LiveSession = { stop: () => void };
 
-export async function startLiveStream(baseUrl: string, handlers: LiveHandlers): Promise<LiveSession> {
-  if (!navigator.mediaDevices?.getUserMedia) throw new Error("Microphone access is not available in this browser.");
+export async function startLiveStream(
+  baseUrl: string,
+  handlers: LiveHandlers,
+): Promise<LiveSession> {
+  if (!navigator.mediaDevices?.getUserMedia)
+    throw new Error("Microphone access is not available in this browser.");
   const stream = await navigator.mediaDevices.getUserMedia({
-    audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+    audio: {
+      channelCount: 1,
+      echoCancellation: false,
+      noiseSuppression: false,
+      autoGainControl: false,
+    },
   });
   const context = new AudioContext();
   const source = context.createMediaStreamSource(stream);
@@ -42,7 +61,13 @@ export async function startLiveStream(baseUrl: string, handlers: LiveHandlers): 
   let tickStart = 0;
   let tick = 0;
 
-  const report = () => handlers.onStats({ framesSent, bufferedFrames: queue.bufferedFrames, droppedFrames: queue.dropped, levelDb });
+  const report = () =>
+    handlers.onStats({
+      framesSent,
+      bufferedFrames: queue.bufferedFrames,
+      droppedFrames: queue.dropped,
+      levelDb,
+    });
 
   const pace = () => {
     if (stopped) return;
@@ -75,22 +100,25 @@ export async function startLiveStream(baseUrl: string, handlers: LiveHandlers): 
     source.disconnect();
     stream.getTracks().forEach((track) => track.stop());
     void context.close().catch(() => undefined);
-    if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) socket.close(1000, "client stop");
+    if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)
+      socket.close(1000, "client stop");
     handlers.onClose(reason);
   };
 
   socket.addEventListener("open", () => {
-    socket.send(JSON.stringify({
-      type: "config",
-      sample_rate: LIVE_SAMPLE_RATE,
-      channels: 1,
-      encoding: "pcm_s16le",
-      frame_bytes: LIVE_FRAME_BYTES,
-      frame_ms: LIVE_FRAME_INTERVAL_MS,
-      vad_preset: "telephony",
-      candidates: LIVE_CANDIDATES,
-      demo: true,
-    }));
+    socket.send(
+      JSON.stringify({
+        type: "config",
+        sample_rate: LIVE_SAMPLE_RATE,
+        channels: 1,
+        encoding: "pcm_s16le",
+        frame_bytes: LIVE_FRAME_BYTES,
+        frame_ms: LIVE_FRAME_INTERVAL_MS,
+        vad_preset: "telephony",
+        candidates: LIVE_CANDIDATES,
+        demo: true,
+      }),
+    );
     source.connect(processor);
     processor.connect(mute);
     mute.connect(context.destination);
@@ -110,7 +138,9 @@ export async function startLiveStream(baseUrl: string, handlers: LiveHandlers): 
     }
   });
   socket.addEventListener("error", () => cleanup("The live audio proxy could not be reached."));
-  socket.addEventListener("close", (event) => cleanup(event.code === 1000 ? undefined : `Live connection closed (${event.code}).`));
+  socket.addEventListener("close", (event) =>
+    cleanup(event.code === 1000 ? undefined : `Live connection closed (${event.code}).`),
+  );
 
   return { stop: () => cleanup() };
 }

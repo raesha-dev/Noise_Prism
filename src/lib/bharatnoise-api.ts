@@ -34,15 +34,35 @@ export type ProcessingResult = {
     guardStatus?: string | undefined;
     spectrum?: number[] | undefined;
   };
-  evaluation?: { wer?: number | undefined; cer?: number | undefined; latencyMs?: number | undefined; calls?: number | undefined; note?: string | undefined } | undefined;
+  evaluation?:
+    | {
+        wer?: number | undefined;
+        cer?: number | undefined;
+        latencyMs?: number | undefined;
+        calls?: number | undefined;
+        note?: string | undefined;
+      }
+    | undefined;
   pipeline: string[];
   latencyMs?: number | undefined;
 };
 
 export type GnaniMode = "unconfigured" | "live" | "mock";
-export type HealthInfo = { status: string; gnaniConfigured: boolean; gnaniMode: GnaniMode; version: string; latencyMs: number };
+export type HealthInfo = {
+  status: string;
+  gnaniConfigured: boolean;
+  gnaniMode: GnaniMode;
+  version: string;
+};
 
-export type EvaluationRow = { id: string; pipeline: string; wer?: number | null | undefined; cer?: number | null | undefined; latencyMs?: number | null | undefined; candidate?: string | null | undefined };
+export type EvaluationRow = {
+  id: string;
+  pipeline: string;
+  wer?: number | null | undefined;
+  cer?: number | null | undefined;
+  latencyMs?: number | null | undefined;
+  candidate?: string | null | undefined;
+};
 export type EvaluationSection = "comparison" | "ablation" | "snr" | "noise";
 export type EvaluationReport = {
   available: boolean;
@@ -63,18 +83,23 @@ export type ProcessOptions = {
 };
 
 const STORAGE_KEY = "bharatnoise.api-base-url";
+export const DEFAULT_API_BASE_URL = "http://127.0.0.1:8000";
 
-export function getApiBaseUrl(): string {
-  if (typeof window === "undefined") return "";
-  const stored = window.localStorage.getItem(STORAGE_KEY);
-  if (stored !== null) return stored;
-  return (import.meta.env["VITE_BHARATNOISE_API_URL"] as string | undefined)?.replace(/\/+$/, "") ?? "";
+function configuredApiBaseUrl(): string {
+  const configured = import.meta.env["VITE_BHARATNOISE_API_URL"] as string | undefined;
+  return configured?.trim().replace(/\/+$/, "") || DEFAULT_API_BASE_URL;
 }
 
-/** Validates and normalizes a proxy base address. Empty input means demo mode. */
+export function getApiBaseUrl(): string {
+  if (typeof window === "undefined") return configuredApiBaseUrl();
+  const stored = window.localStorage.getItem(STORAGE_KEY);
+  return stored?.trim() ? stored : configuredApiBaseUrl();
+}
+
+/** Validates and normalizes a proxy base address. Empty input selects the local backend. */
 export function normalizeBaseUrl(value: string): string {
   const trimmed = value.trim().replace(/\/+$/, "");
-  if (!trimmed) return "";
+  if (!trimmed) return configuredApiBaseUrl();
   let url: URL;
   try {
     url = new URL(trimmed);
@@ -105,7 +130,12 @@ async function readError(response: Response): Promise<string> {
     if (typeof value === "string") return value;
   }
   const error = payload?.error;
-  if (typeof error === "object" && error !== null && "message" in error && typeof error.message === "string") {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "message" in error &&
+    typeof error.message === "string"
+  ) {
     return error.message;
   }
   if (Array.isArray(payload?.detail)) return "The audio service rejected the request fields (422).";
@@ -114,7 +144,10 @@ async function readError(response: Response): Promise<string> {
 
 function withTimeout(signal: AbortSignal | undefined, timeoutMs: number) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(new DOMException("timeout", "TimeoutError")), timeoutMs);
+  const timer = setTimeout(
+    () => controller.abort(new DOMException("timeout", "TimeoutError")),
+    timeoutMs,
+  );
   const onAbort = () => controller.abort(signal?.reason);
   signal?.addEventListener("abort", onAbort, { once: true });
   return {
@@ -127,12 +160,18 @@ function withTimeout(signal: AbortSignal | undefined, timeoutMs: number) {
 }
 
 function describeFetchError(error: unknown, timeoutMs: number): Error {
-  if (error instanceof DOMException && error.name === "AbortError") return new Error("Processing was cancelled.");
-  if ((error instanceof DOMException && error.name === "TimeoutError") || (error as { name?: string | undefined })?.name === "TimeoutError") {
+  if (error instanceof DOMException && error.name === "AbortError")
+    return new Error("Processing was cancelled.");
+  if (
+    (error instanceof DOMException && error.name === "TimeoutError") ||
+    (error as { name?: string | undefined })?.name === "TimeoutError"
+  ) {
     return new Error(`The audio service did not answer within ${Math.round(timeoutMs / 1000)} s.`);
   }
   if (error instanceof TypeError) {
-    return new Error("Could not reach the audio service. Check the address, that it is running, and that it allows this site (CORS).");
+    return new Error(
+      "Could not reach the audio service. Check the address, that it is running, and that it allows this site (CORS).",
+    );
   }
   return error instanceof Error ? error : new Error("The audio service request failed.");
 }
@@ -141,58 +180,69 @@ const num = z.number().finite();
 const nullableNum = num.nullable();
 const nullableStr = z.string().nullable();
 
-const candidateSchema = z.object({
-  transcript: nullableStr,
-  audio_url: nullableStr,
-  peaks: z.array(num),
-  guard_score: nullableNum,
-  confidence: nullableNum,
-  snr_db: nullableNum,
-}).strict().transform((value) => ({
-  transcript: value.transcript,
-  audioUrl: value.audio_url,
-  peaks: value.peaks,
-  guardScore: value.guard_score,
-  confidence: value.confidence,
-  snrDb: value.snr_db,
-}));
+const candidateSchema = z
+  .object({
+    transcript: nullableStr,
+    audio_url: nullableStr,
+    peaks: z.array(num),
+    guard_score: nullableNum,
+    confidence: nullableNum,
+    snr_db: nullableNum,
+  })
+  .strict()
+  .transform((value) => ({
+    transcript: value.transcript,
+    audioUrl: value.audio_url,
+    peaks: value.peaks,
+    guardScore: value.guard_score,
+    confidence: value.confidence,
+    snrDb: value.snr_db,
+  }));
 
-const analysisSchema = z.object({
-  snr_db: nullableNum,
-  noise_floor_db: nullableNum,
-  speech_energy_db: nullableNum,
-  vad_segments: z.array(z.tuple([num, num])),
-  guard_status: nullableStr,
-  guard_result: z.record(z.string(), z.unknown()).nullable(),
-  spectrum: z.array(num),
-}).strict();
+const analysisSchema = z
+  .object({
+    snr_db: nullableNum,
+    noise_floor_db: nullableNum,
+    speech_energy_db: nullableNum,
+    vad_segments: z.array(z.tuple([num, num])),
+    guard_status: nullableStr,
+    guard_result: z.record(z.string(), z.unknown()).nullable(),
+    spectrum: z.array(num),
+  })
+  .strict();
 
-const serviceEvaluationSchema = z.object({
-  wer: nullableNum,
-  cer: nullableNum,
-  latency_ms: nullableNum,
-  calls: z.number().int().nullable(),
-  note: nullableStr,
-}).strict();
+const serviceEvaluationSchema = z
+  .object({
+    wer: nullableNum,
+    cer: nullableNum,
+    latency_ms: nullableNum,
+    calls: z.number().int().nullable(),
+    note: nullableStr,
+  })
+  .strict();
 
-const resultSchema = z.object({
-  request_id: z.string().min(1),
-  gnani_mode: z.enum(["unconfigured", "live", "mock"]),
-  score_suppressed_reason: z.string().nullable(),
-  selected_candidate: z.enum(TRACK_IDS),
-  transcription: z.string(),
-  candidates: z.record(z.enum(TRACK_IDS), candidateSchema),
-  analysis: analysisSchema,
-  evaluation: serviceEvaluationSchema,
-  pipeline: z.array(z.string()),
-  latency_ms: num,
-  router_fitted: z.boolean(),
-  suppression_fitted: z.boolean().nullable(),
-}).strict();
+const resultSchema = z
+  .object({
+    request_id: z.string().min(1),
+    gnani_mode: z.enum(["unconfigured", "live", "mock"]),
+    score_suppressed_reason: z.string().nullable(),
+    selected_candidate: z.enum(TRACK_IDS),
+    transcription: z.string(),
+    candidates: z.record(z.enum(TRACK_IDS), candidateSchema),
+    analysis: analysisSchema,
+    evaluation: serviceEvaluationSchema,
+    pipeline: z.array(z.string()),
+    latency_ms: num,
+    router_fitted: z.boolean(),
+    suppression_fitted: z.boolean().nullable(),
+  })
+  .strict();
 
 function responseShapeError(label: string, issues: { path: PropertyKey[] }[]): Error {
   const paths = issues.map((issue) => issue.path.map(String).join(".") || "(root)");
-  return new Error(`${label} response does not match the workstation contract${paths.length ? `: ${paths.join(", ")}` : "."}`);
+  return new Error(
+    `${label} response does not match the workstation contract${paths.length ? `: ${paths.join(", ")}` : "."}`,
+  );
 }
 
 export function asTrackId(value: unknown): TrackId | undefined {
@@ -219,7 +269,10 @@ export function normalizeProcessingResult(raw: unknown, baseUrl = ""): Processin
   for (const [key, value] of Object.entries(body.candidates)) {
     const id = asTrackId(key);
     if (!id) continue;
-    candidates[id] = { ...value, audioUrl: resolveServiceUrl(baseUrl, value.audioUrl ?? undefined) };
+    candidates[id] = {
+      ...value,
+      audioUrl: resolveServiceUrl(baseUrl, value.audioUrl ?? undefined),
+    };
   }
   const selectedCandidate = asTrackId(body.selected_candidate);
   if (!selectedCandidate || (!body.transcription && Object.keys(candidates).length === 0)) {
@@ -230,7 +283,9 @@ export function normalizeProcessingResult(raw: unknown, baseUrl = ""): Processin
     gnaniMode: body.gnani_mode,
     scoreSuppressedReason: body.score_suppressed_reason ?? undefined,
     selectedCandidate,
-    transcription: body.transcription ?? (selectedCandidate ? candidates[selectedCandidate]?.transcript : undefined),
+    transcription:
+      body.transcription ??
+      (selectedCandidate ? candidates[selectedCandidate]?.transcript : undefined),
     candidates,
     analysis: {
       snrDb: body.analysis.snr_db ?? undefined,
@@ -254,7 +309,11 @@ export function normalizeProcessingResult(raw: unknown, baseUrl = ""): Processin
 }
 
 /** Builds the multipart body for POST /process. */
-export function buildProcessForm(file: File | Blob, fileName: string, options: Omit<ProcessOptions, "signal" | "timeoutMs">): FormData {
+export function buildProcessForm(
+  file: File | Blob,
+  fileName: string,
+  options: Omit<ProcessOptions, "signal" | "timeoutMs">,
+): FormData {
   const candidates = options.candidates.length ? options.candidates : ["C0"];
   const form = new FormData();
   form.append("file", file, fileName);
@@ -272,24 +331,28 @@ export function buildProcessForm(file: File | Blob, fileName: string, options: O
 
 export async function checkApiConnection(baseUrl: string): Promise<HealthInfo> {
   if (!baseUrl) throw new Error("Add your FastAPI or Flask proxy address first.");
-  const started = performance.now();
   const timeout = withTimeout(undefined, 8000);
   try {
-    const response = await fetch(`${baseUrl}/health`, { headers: { Accept: "application/json" }, signal: timeout.signal });
+    const response = await fetch(`${baseUrl}/health`, {
+      headers: { Accept: "application/json" },
+      signal: timeout.signal,
+    });
     if (!response.ok) throw new Error(await readError(response));
-    const parsed = z.object({
-      status: z.string(),
-      gnani_configured: z.boolean(),
+    const parsed = z
+      .object({
+        status: z.string(),
+        gnani_configured: z.boolean(),
         gnani_mode: z.enum(["unconfigured", "live", "mock"]),
         version: z.string(),
-    }).strict().safeParse(await response.json());
+      })
+      .strict()
+      .safeParse(await response.json());
     if (!parsed.success) throw responseShapeError("GET /health", parsed.error.issues);
     return {
       status: parsed.data.status,
       gnaniConfigured: parsed.data.gnani_configured,
       gnaniMode: parsed.data.gnani_mode,
       version: parsed.data.version,
-      latencyMs: Math.round(performance.now() - started),
     };
   } catch (error) {
     throw describeFetchError(error, 8000);
@@ -298,7 +361,11 @@ export async function checkApiConnection(baseUrl: string): Promise<HealthInfo> {
   }
 }
 
-export async function processAudioFile(baseUrl: string, file: File, options: ProcessOptions): Promise<ProcessingResult> {
+export async function processAudioFile(
+  baseUrl: string,
+  file: File,
+  options: ProcessOptions,
+): Promise<ProcessingResult> {
   const timeoutMs = options.timeoutMs ?? 180_000;
   const timeout = withTimeout(options.signal, timeoutMs);
   const started = performance.now();
@@ -319,51 +386,62 @@ export async function processAudioFile(baseUrl: string, file: File, options: Pro
   }
 }
 
-const rowSchema = z.object({
-  id: z.union([z.string(), z.number()]).transform(String),
-  pipeline: z.string(),
-  wer: nullableNum.optional(),
-  cer: nullableNum.optional(),
-  latency_ms: nullableNum.optional(),
-  candidate: z.string().nullable().optional(),
-}).strict().transform((row) => ({
-  id: row.id,
-  pipeline: row.pipeline,
-  wer: row.wer,
-  cer: row.cer,
-  latencyMs: row.latency_ms,
-  candidate: row.candidate,
-}));
+const rowSchema = z
+  .object({
+    id: z.union([z.string(), z.number()]).transform(String),
+    pipeline: z.string(),
+    wer: nullableNum.optional(),
+    cer: nullableNum.optional(),
+    latency_ms: nullableNum.optional(),
+    candidate: z.string().nullable().optional(),
+  })
+  .strict()
+  .transform((row) => ({
+    id: row.id,
+    pipeline: row.pipeline,
+    wer: row.wer,
+    cer: row.cer,
+    latencyMs: row.latency_ms,
+    candidate: row.candidate,
+  }));
 
-const reportSectionsSchema = z.object({
-  comparison: z.array(rowSchema).optional(),
-  ablation: z.array(rowSchema).optional(),
-  snr: z.array(rowSchema).optional(),
-  noise: z.array(rowSchema).optional(),
-}).strict();
+const reportSectionsSchema = z
+  .object({
+    comparison: z.array(rowSchema).optional(),
+    ablation: z.array(rowSchema).optional(),
+    snr: z.array(rowSchema).optional(),
+    noise: z.array(rowSchema).optional(),
+  })
+  .strict();
 
-const reportSchema = z.object({
-  available: z.boolean().optional(),
-  reason: z.string().nullable().optional(),
-  dataset: z.string().nullable().optional(),
-  clip_count: z.number().int().nullable().optional(),
-  measured_at: z.string().nullable().optional(),
-  sections: reportSectionsSchema,
-}).strict();
+const reportSchema = z
+  .object({
+    available: z.boolean().optional(),
+    reason: z.string().nullable().optional(),
+    dataset: z.string().nullable().optional(),
+    clip_count: z.number().int().nullable().optional(),
+    measured_at: z.string().nullable().optional(),
+    sections: reportSectionsSchema,
+  })
+  .strict();
 
-const evaluationResponseSchema = z.object({
-  available: z.boolean(),
-  reason: z.string().nullable(),
-  dataset: z.string().nullable(),
-  clip_count: z.number().int().nullable(),
-  measured_at: z.string().nullable(),
-  sections: z.object({
-    comparison: z.array(rowSchema),
-    ablation: z.array(rowSchema),
-    snr: z.array(rowSchema),
-    noise: z.array(rowSchema),
-  }).strict(),
-}).strict();
+const evaluationResponseSchema = z
+  .object({
+    available: z.boolean(),
+    reason: z.string().nullable(),
+    dataset: z.string().nullable(),
+    clip_count: z.number().int().nullable(),
+    measured_at: z.string().nullable(),
+    sections: z
+      .object({
+        comparison: z.array(rowSchema),
+        ablation: z.array(rowSchema),
+        snr: z.array(rowSchema),
+        noise: z.array(rowSchema),
+      })
+      .strict(),
+  })
+  .strict();
 
 /** Parses an evaluation report (GET /evaluation or an imported JSON file). WER/CER are fractions 0–1. */
 export function parseEvaluationReport(raw: unknown): EvaluationReport {
@@ -382,7 +460,10 @@ export function parseEvaluationReport(raw: unknown): EvaluationReport {
 export async function fetchEvaluation(baseUrl: string): Promise<EvaluationReport> {
   const timeout = withTimeout(undefined, 15_000);
   try {
-    const response = await fetch(`${baseUrl}/evaluation`, { headers: { Accept: "application/json" }, signal: timeout.signal });
+    const response = await fetch(`${baseUrl}/evaluation`, {
+      headers: { Accept: "application/json" },
+      signal: timeout.signal,
+    });
     if (!response.ok) throw new Error(await readError(response));
     const raw = await response.json();
     const parsed = evaluationResponseSchema.safeParse(raw);
@@ -414,8 +495,22 @@ export type LiveMessage =
   | { type: "connected"; config?: Record<string, unknown> | undefined }
   | { type: "speech_start" }
   | { type: "processing" }
-  | { type: "transcript"; text: string; final: boolean; audioDurationMs?: number | undefined; segmentIndex?: number | undefined; latencyMs?: number | undefined; detectedLanguageCode?: string | undefined; candidate?: TrackId | undefined }
-  | { type: "metrics"; snrDb?: number | undefined; latencyMs?: number | undefined; candidate?: TrackId | undefined }
+  | {
+      type: "transcript";
+      text: string;
+      final: boolean;
+      audioDurationMs?: number | undefined;
+      segmentIndex?: number | undefined;
+      latencyMs?: number | undefined;
+      detectedLanguageCode?: string | undefined;
+      candidate?: TrackId | undefined;
+    }
+  | {
+      type: "metrics";
+      snrDb?: number | undefined;
+      latencyMs?: number | undefined;
+      candidate?: TrackId | undefined;
+    }
   | { type: "error"; message: string };
 
 /** Validates one JSON text message relayed by the backend's Gnani WebSocket proxy. */
@@ -431,27 +526,39 @@ export function parseLiveMessage(data: unknown): LiveMessage {
   if (!envelope.success) throw responseShapeError("WS /live", envelope.error.issues);
   const body = envelope.data;
   if (body.type === "connected") {
-    const parsed = z.object({ type: z.literal("connected"), config: z.record(z.string(), z.unknown()).optional() }).passthrough().safeParse(body);
+    const parsed = z
+      .object({
+        type: z.literal("connected"),
+        config: z.record(z.string(), z.unknown()).optional(),
+      })
+      .passthrough()
+      .safeParse(body);
     if (!parsed.success) throw responseShapeError("WS /live connected", parsed.error.issues);
     return { type: "connected", config: parsed.data.config };
   }
   if (body.type === "speech_start" || body.type === "processing") return { type: body.type };
   if (body.type === "transcript" || body.type === "partial" || body.type === "final") {
-    const parsed = z.object({
-      type: z.enum(["transcript", "partial", "final"]),
-      text: z.string(),
-      audio_duration_ms: num.optional(),
-      segment_index: z.number().int().optional(),
-      latency: num.optional(),
-      detected_language_code: z.string().optional(),
-      final: z.boolean().optional(),
-      candidate: z.string().optional(),
-    }).passthrough().safeParse(body);
+    const parsed = z
+      .object({
+        type: z.enum(["transcript", "partial", "final"]),
+        text: z.string(),
+        audio_duration_ms: num.optional(),
+        segment_index: z.number().int().optional(),
+        latency: num.optional(),
+        detected_language_code: z.string().optional(),
+        final: z.boolean().optional(),
+        candidate: z.string().optional(),
+      })
+      .passthrough()
+      .safeParse(body);
     if (!parsed.success) throw responseShapeError("WS /live transcript", parsed.error.issues);
     return {
       type: "transcript",
       text: parsed.data.text,
-      final: parsed.data.type === "final" || parsed.data.final === true || parsed.data.type === "transcript",
+      final:
+        parsed.data.type === "final" ||
+        parsed.data.final === true ||
+        parsed.data.type === "transcript",
       audioDurationMs: parsed.data.audio_duration_ms,
       segmentIndex: parsed.data.segment_index,
       latencyMs: parsed.data.latency,
@@ -460,23 +567,37 @@ export function parseLiveMessage(data: unknown): LiveMessage {
     };
   }
   if (body.type === "metrics") {
-    const parsed = z.object({
-      type: z.literal("metrics"),
-      snr_db: num.optional(),
-      latency_ms: num.optional(),
-      candidate: z.string().optional(),
-    }).passthrough().safeParse(body);
+    const parsed = z
+      .object({
+        type: z.literal("metrics"),
+        snr_db: num.optional(),
+        latency_ms: num.optional(),
+        candidate: z.string().optional(),
+      })
+      .passthrough()
+      .safeParse(body);
     if (!parsed.success) throw responseShapeError("WS /live metrics", parsed.error.issues);
-    return { type: "metrics", snrDb: parsed.data.snr_db, latencyMs: parsed.data.latency_ms, candidate: asTrackId(parsed.data.candidate) };
+    return {
+      type: "metrics",
+      snrDb: parsed.data.snr_db,
+      latencyMs: parsed.data.latency_ms,
+      candidate: asTrackId(parsed.data.candidate),
+    };
   }
   if (body.type === "error") {
-    const parsed = z.object({
-      type: z.literal("error"),
-      message: z.string().optional(),
-      error: z.string().optional(),
-    }).passthrough().safeParse(body);
+    const parsed = z
+      .object({
+        type: z.literal("error"),
+        message: z.string().optional(),
+        error: z.string().optional(),
+      })
+      .passthrough()
+      .safeParse(body);
     if (!parsed.success) throw responseShapeError("WS /live error", parsed.error.issues);
-    return { type: "error", message: parsed.data.message ?? parsed.data.error ?? "The live proxy reported an error." };
+    return {
+      type: "error",
+      message: parsed.data.message ?? parsed.data.error ?? "The live proxy reported an error.",
+    };
   }
   throw new Error(`The live proxy sent unsupported message type "${body.type}".`);
 }

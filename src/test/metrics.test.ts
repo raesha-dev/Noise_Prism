@@ -11,7 +11,11 @@ describe("transcript scoring", () => {
     expect(characterErrorRate("abcd", "abed")).toBeCloseTo(0.25);
   });
   it("highlights words that differ from C0", () => {
-    expect(diffWords("voh plan varna", "woh plan warna").map((t) => t.kind)).toEqual(["changed", "same", "changed"]);
+    expect(diffWords("voh plan varna", "woh plan warna").map((t) => t.kind)).toEqual([
+      "changed",
+      "same",
+      "changed",
+    ]);
   });
 });
 
@@ -19,7 +23,11 @@ describe("browser estimates", () => {
   it("finds speech in a tone burst and reports a high SNR over a quiet floor", () => {
     const rate = 8000;
     const samples = new Float32Array(rate * 2);
-    for (let i = 0; i < samples.length; i += 1) samples[i] = i > rate * 0.5 && i < rate * 1.5 ? 0.5 * Math.sin((2 * Math.PI * 400 * i) / rate) : 0.001 * Math.sin(i * 1.3);
+    for (let i = 0; i < samples.length; i += 1)
+      samples[i] =
+        i > rate * 0.5 && i < rate * 1.5
+          ? 0.5 * Math.sin((2 * Math.PI * 400 * i) / rate)
+          : 0.001 * Math.sin(i * 1.3);
     const stats = analyzeSignal(samples, rate);
     expect(stats.snrDb).toBeGreaterThan(30);
     expect(stats.vadBins[24]).toBe(true);

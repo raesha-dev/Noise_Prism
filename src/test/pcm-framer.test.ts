@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { LIVE_CANDIDATES, LIVE_FRAME_BYTES, LIVE_FRAME_INTERVAL_MS, LIVE_SAMPLE_RATE, Pcm16Resampler, PcmFrameQueue } from "@/lib/pcm-framer";
+import {
+  LIVE_CANDIDATES,
+  LIVE_FRAME_BYTES,
+  LIVE_FRAME_INTERVAL_MS,
+  LIVE_SAMPLE_RATE,
+  Pcm16Resampler,
+  PcmFrameQueue,
+} from "@/lib/pcm-framer";
 
 describe("live frame contract", () => {
   it("uses exactly 1,024-byte frames at 64 ms cadence and 8 kHz", () => {
