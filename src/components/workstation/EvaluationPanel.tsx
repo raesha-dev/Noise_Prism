@@ -100,7 +100,7 @@ export function EvaluationPanel({ report, onReport, reportSource, apiUrl, lastRe
         <Segmented className="eval-tabs" label="Evaluation section" value={section} onChange={setSection} options={(Object.keys(SECTION_LABELS) as EvaluationSection[]).map((value) => ({ value, label: SECTION_LABELS[value] }))} />
         <div className="eval-actions">
           <input ref={importRef} type="file" accept="application/json,.json" className="visually-hidden" onChange={(event) => void importFile(event)} aria-label="Import evaluation JSON" tabIndex={-1} />
-          <Button variant="outline" size="sm" onClick={() => void load()} disabled={!apiUrl || loading} title={apiUrl ? "GET /evaluation" : "Connect a service first"}>{loading ? <LoaderCircle className="spin" /> : <CloudDownload />}Load</Button>
+          <Button variant="outline" size="sm" onClick={() => void load()} disabled={!apiUrl || loading} title={apiUrl ? "GET /evaluation" : "Connect a service first"}>{loading ? <LoaderCircle className="spin" /> : <CloudDownload />}Load from service</Button>
           <Button variant="outline" size="sm" onClick={() => importRef.current?.click()}><FileUp />Import</Button>
           <Button variant="outline" size="sm" onClick={exportCsv}><FileDown />CSV</Button>
           {!isSample && <Button variant="ghost" size="sm" onClick={() => onReport(null, null)} aria-label="Return to sample rows"><RotateCcw /></Button>}
