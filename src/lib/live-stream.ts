@@ -100,8 +100,14 @@ export async function startLiveStream(baseUrl: string, handlers: LiveHandlers): 
     handlers.onOpen();
   });
   socket.addEventListener("message", (event) => {
-    const message = parseLiveMessage(event.data);
-    if (message) handlers.onMessage(message);
+    try {
+      handlers.onMessage(parseLiveMessage(event.data));
+    } catch (error) {
+      handlers.onMessage({
+        type: "error",
+        message: error instanceof Error ? error.message : "The live proxy response was invalid.",
+      });
+    }
   });
   socket.addEventListener("error", () => cleanup("The live audio proxy could not be reached."));
   socket.addEventListener("close", (event) => cleanup(event.code === 1000 ? undefined : `Live connection closed (${event.code}).`));

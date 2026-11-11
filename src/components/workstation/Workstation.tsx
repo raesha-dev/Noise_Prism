@@ -19,7 +19,7 @@ import { EvaluationPanel } from "./EvaluationPanel";
 import { LivePanel, type LiveView } from "./LivePanel";
 import { HistoryPanel } from "./HistoryPanel";
 import { SettingsDialog } from "./SettingsDialog";
-import { ASR_MODELS, downloadBlob, illustrativePeaks, sampleTexts, trackName } from "./shared";
+import { ASR_MODELS, downloadBlob, illustrativePeaks, trackName } from "./shared";
 
 type Clip = {
   file: File;
@@ -426,22 +426,17 @@ export function Workstation() {
     }
     const reset = { seconds: 0, framesSent: 0, droppedFrames: 0, levelDb: -120, latencyMs: undefined, snrDb: undefined, finals: [], partial: "" };
     if (!apiUrl) {
-      const words = sampleTexts.C1.split(" ");
       let frames = 0;
       liveStartRef.current = performance.now();
       setLive({ ...reset, state: "live", kind: "simulated" });
       simTimerRef.current = setInterval(() => {
         frames += 1;
-        const wordIndex = Math.floor(frames / 6) % (words.length + 4);
         setLive((value) => {
-          const finished = wordIndex === 0 && frames % 6 === 0 && value.partial;
           return {
             ...value,
             framesSent: frames,
             seconds: Math.floor((frames * LIVE_FRAME_INTERVAL_MS) / 1000),
             levelDb: -32 + 12 * Math.sin(frames / 5) + 6 * Math.sin(frames / 1.7),
-            partial: wordIndex < words.length ? words.slice(0, wordIndex + 1).join(" ") : value.partial,
-            finals: finished ? [...value.finals, `${value.partial} (simulated)`] : value.finals,
           };
         });
       }, LIVE_FRAME_INTERVAL_MS);
@@ -460,7 +455,7 @@ export function Workstation() {
             setLive((value) => message.final ? { ...value, finals: [...value.finals, message.text].slice(-20), partial: "" } : { ...value, partial: message.text });
           } else if (message.type === "metrics") {
             setLive((value) => ({ ...value, latencyMs: message.latencyMs ?? value.latencyMs, snrDb: message.snrDb ?? value.snrDb }));
-          } else {
+          } else if (message.type === "error") {
             toast.error(message.message);
           }
         },
@@ -519,10 +514,10 @@ export function Workstation() {
         const text = result.candidates[id]?.transcript ?? (id === result.selectedCandidate ? result.transcription : undefined);
         return { id, text, source: text ? "service" : "missing" };
       }
-      return { id, text: sampleTexts[id], source: "sample" };
+      return { id, source: "sample" };
     });
   }, [checked, selected, result, resultSource, includeC3]);
-  const baseline = transcripts.find((item) => item.id === "C0")?.text ?? (resultSource === "service" ? result?.candidates.C0?.transcript : sampleTexts.C0);
+  const baseline = transcripts.find((item) => item.id === "C0")?.text ?? (resultSource === "service" ? result?.candidates.C0?.transcript : undefined);
 
   const routeNote = resultSource === "demo"
     ? `Demo routing from the browser SNR estimate (${analysis.snrDb?.toFixed(1) ?? "—"} dB). Your service makes the real choice.`

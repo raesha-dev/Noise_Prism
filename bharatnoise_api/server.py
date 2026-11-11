@@ -151,6 +151,77 @@ class ScoreRequest(BaseModel):
     hypothesis: str
 
 
+class LegacyHealthResponse(BaseModel):
+    status: str
+    gnani_configured: bool
+    version: str
+
+
+class ApiHealthResponse(LegacyHealthResponse):
+    ok: bool
+    gnani_key_configured: bool
+    clips_in_memory: int
+    jobs_in_memory: int
+
+
+class LegacyCandidateResponse(BaseModel):
+    transcript: str | None
+    audio_url: str | None
+    peaks: list[float]
+    guard_score: float | None = None
+    confidence: float | None = None
+    snr_db: float | None = None
+
+
+class LegacyAnalysisResponse(BaseModel):
+    snr_db: float | None = None
+    noise_floor_db: float | None = None
+    speech_energy_db: float | None = None
+    vad_segments: list[tuple[float, float]]
+    guard_status: str | None = None
+    guard_result: dict[str, Any] | None = None
+    spectrum: list[float]
+
+
+class LegacyEvaluationResponse(BaseModel):
+    wer: float | None = None
+    cer: float | None = None
+    latency_ms: float | None = None
+    calls: int | None = None
+    note: str | None = None
+
+
+class LegacyProcessResponse(BaseModel):
+    request_id: str
+    selected_candidate: Literal["C0", "C1", "C2", "C3"]
+    transcription: str
+    candidates: dict[str, LegacyCandidateResponse]
+    analysis: LegacyAnalysisResponse
+    evaluation: LegacyEvaluationResponse
+    pipeline: list[str]
+    latency_ms: float
+    router_fitted: bool
+    suppression_fitted: bool | None
+
+
+class LegacyEvaluationRow(BaseModel):
+    id: str
+    pipeline: str
+    wer: float | None = None
+    cer: float | None = None
+    latency_ms: float | None = None
+    candidate: str | None = None
+
+
+class LegacyEvaluationResponseModel(BaseModel):
+    available: bool
+    reason: str | None = None
+    dataset: str | None = None
+    clip_count: int | None = None
+    measured_at: str | None = None
+    sections: dict[str, list[LegacyEvaluationRow]]
+
+
 def clean(obj: Any) -> Any:
     """JSON cannot carry NaN; turn it into null."""
     if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
@@ -429,8 +500,8 @@ def create_app(settings: Optional[Settings] = None,
         return JSONResponse(status_code=exc.status_code, content={"error": {"code": code, "message": message}})
 
     # ------------------------------------------------------------------ meta
-    @app.get("/health")
-    @app.get("/api/health")
+    @app.get("/health", response_model=LegacyHealthResponse)
+    @app.get("/api/health", response_model=ApiHealthResponse)
     def health():
         """Liveness plus whether the server can reach Gnani. Never returns secrets."""
         configured = bool(os.environ.get("GNANI_API_KEY")) or client_factory is not None
@@ -583,7 +654,7 @@ def create_app(settings: Optional[Settings] = None,
         await holder["queue"].put(job)
         return {"job_id": job.id, "status": job.status}
 
-    @app.post("/process", dependencies=[Depends(require_token)])
+    @app.post("/process", response_model=LegacyProcessResponse, dependencies=[Depends(require_token)])
     async def frontend_process(
         file: UploadFile = File(...),
         mode: str = Form("fast"),
@@ -772,12 +843,19 @@ def create_app(settings: Optional[Settings] = None,
             out["by"] = {k: cmp.summarise(v, n_boot, 0) for k, v in sorted(groups.items())}
         return clean(out)
 
-    @app.get("/evaluation")
+    @app.get("/evaluation", response_model=LegacyEvaluationResponseModel)
     def frontend_evaluation():
         """Expose measured aggregate CSV rows in the workstation's evaluation contract."""
         final_path = cfg.results_dir / "final_results.csv"
         if not final_path.is_file():
-            raise ApiError(404, "RESULTS_NOT_FOUND", "Evaluation results are not available until aggregate_results.py has run.")
+            return {
+                "available": False,
+                "reason": "No benchmark results have been generated yet.",
+                "dataset": None,
+                "clip_count": None,
+                "measured_at": None,
+                "sections": {"comparison": [], "ablation": [], "snr": [], "noise": []},
+            }
 
         def ui_rows(path: Path, default_pipeline: str) -> list[dict]:
             if not path.is_file():
@@ -799,7 +877,10 @@ def create_app(settings: Optional[Settings] = None,
         final_rows = ui_rows(final_path, "Measured benchmark")
         measured_at = time.strftime("%Y-%m-%d", time.gmtime(final_path.stat().st_mtime))
         return {
+            "available": True,
+            "reason": None,
             "clip_count": len(final_rows),
+            "dataset": None,
             "measured_at": measured_at,
             "sections": {
                 "comparison": final_rows,

@@ -92,6 +92,9 @@ def test_health_and_config(tmp_path):
     app, _ = make_app(tmp_path)
     with TestClient(app) as c:
         assert c.get("/api/health").json()["ok"] is True
+        legacy_health = c.get("/health")
+        assert legacy_health.status_code == 200
+        assert set(legacy_health.json()) == {"status", "gnani_configured", "version"}
         cfg = c.get("/api/config").json()
         avail = {x["id"]: x["available"] for x in cfg["candidates"]}
         assert avail == {"C0": True, "C1": True, "C2": True, "C3": False}
@@ -107,6 +110,13 @@ def test_health_and_config(tmp_path):
         for path in ("/api/clips", "/api/jobs", "/api/score", "/api/results/compare", "/api/results/tables",
                      "/process", "/evaluation"):
             assert path in paths
+        for path, method, schema_name in (
+            ("/health", "get", "LegacyHealthResponse"),
+            ("/process", "post", "LegacyProcessResponse"),
+            ("/evaluation", "get", "LegacyEvaluationResponseModel"),
+        ):
+            response_schema = paths[path][method]["responses"]["200"]["content"]["application/json"]["schema"]
+            assert response_schema["$ref"].endswith(f"/{schema_name}")
 
 
 def test_app_creation_does_not_create_data_directories(tmp_path, monkeypatch):
@@ -259,10 +269,22 @@ def test_frontend_process_contract_and_measured_scores(tmp_path):
         assert response.status_code == 200, response.text
         result = response.json()
         assert result["selected_candidate"] in {"C0", "C1", "C2"}
+        assert set(result) == {
+            "request_id", "selected_candidate", "transcription", "candidates", "analysis",
+            "evaluation", "pipeline", "latency_ms", "router_fitted", "suppression_fitted",
+        }
+        assert set(result["candidates"][result["selected_candidate"]]) == {
+            "transcript", "audio_url", "peaks", "guard_score", "confidence", "snr_db",
+        }
+        assert set(result["analysis"]) == {
+            "snr_db", "noise_floor_db", "speech_energy_db", "vad_segments", "guard_status",
+            "guard_result", "spectrum",
+        }
         assert result["candidates"][result["selected_candidate"]]["transcript"] == "नमस्ते दुनिया"
         assert result["candidates"][result["selected_candidate"]]["audio_url"].startswith("/api/clips/")
         assert result["evaluation"]["calls"] == 1
-        assert "wer" not in result["evaluation"]
+        assert result["evaluation"]["wer"] is None
+        assert set(result["evaluation"]) == {"wer", "cer", "latency_ms", "calls", "note"}
         assert fake.calls and len(fake.calls) == 1
 
         body.update({"mode": "max", "selection": "consensus"})
@@ -280,7 +302,16 @@ def test_frontend_process_contract_and_measured_scores(tmp_path):
 def test_aggregate_routes_are_explicit_when_missing(tmp_path):
     app, _ = make_app(tmp_path)
     with TestClient(app) as c:
-        assert c.get("/evaluation").json()["error"]["code"] == "RESULTS_NOT_FOUND"
+        empty = c.get("/evaluation")
+        assert empty.status_code == 200
+        assert empty.json() == {
+            "available": False,
+            "reason": "No benchmark results have been generated yet.",
+            "dataset": None,
+            "clip_count": None,
+            "measured_at": None,
+            "sections": {"comparison": [], "ablation": [], "snr": [], "noise": []},
+        }
         result = c.get("/api/results/tables")
         assert result.status_code == 404
         assert result.json()["error"]["code"] == "AGGREGATES_NOT_FOUND"

@@ -1,7 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  buildProcessForm, makeLiveSocketUrl, normalizeBaseUrl, normalizeProcessingResult, parseEvaluationReport, parseLiveMessage,
+  buildProcessForm, checkApiConnection, makeLiveSocketUrl, normalizeBaseUrl, normalizeProcessingResult, parseEvaluationReport, parseLiveMessage,
 } from "@/lib/bharatnoise-api";
+
+afterEach(() => vi.unstubAllGlobals());
 
 describe("proxy address", () => {
   it("accepts HTTPS and strips trailing slashes", () => {
@@ -35,23 +37,59 @@ describe("POST /process request", () => {
   });
 });
 
+describe("GET /health response", () => {
+  it("validates the documented fields and measures request latency locally", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      status: "ok", gnani_configured: false, version: "0.3.1",
+    }), { headers: { "Content-Type": "application/json" } })));
+    await expect(checkApiConnection("http://localhost:8000")).resolves.toMatchObject({
+      status: "ok", gnaniConfigured: false, version: "0.3.1",
+    });
+  });
+  it("surfaces a malformed health response", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ status: "ok" }), {
+      headers: { "Content-Type": "application/json" },
+    })));
+    await expect(checkApiConnection("http://localhost:8000")).rejects.toThrow(/GET \/health response does not match/);
+  });
+});
+
 describe("POST /process response", () => {
-  it("normalizes string and object candidates and resolves relative audio URLs", () => {
+  it("validates the backend response and resolves candidate audio URLs", () => {
     const result = normalizeProcessingResult({
-      selected_candidate: "c2",
-      candidates: { C0: "original text", C2: { transcript: "enhanced", audio_url: "/audio/c2.wav", guard_score: 0.91 }, X9: "ignored" },
-      analysis: { snr_db: 6.4, vad_segments: [[0.2, 1.4]] },
+      request_id: "mock-request",
+      selected_candidate: "C2",
+      transcription: "[MOCK] enhanced fixture",
+      candidates: {
+        C0: { transcript: "[MOCK] original fixture", audio_url: "/api/clips/mock/C0", peaks: [], guard_score: null, confidence: null, snr_db: null },
+        C2: { transcript: "[MOCK] enhanced fixture", audio_url: "/api/clips/mock/C2", peaks: [], guard_score: null, confidence: null, snr_db: null },
+      },
+      analysis: { snr_db: null, noise_floor_db: null, speech_energy_db: null, vad_segments: [], guard_status: null, guard_result: null, spectrum: [] },
+      evaluation: { wer: null, cer: null, latency_ms: null, calls: null, note: "Mock scores are suppressed." },
+      pipeline: ["mock"],
+      latency_ms: 12,
+      router_fitted: false,
+      suppression_fitted: false,
     }, "https://api.example.com");
     expect(result.selectedCandidate).toBe("C2");
-    expect(result.candidates.C0?.transcript).toBe("original text");
-    expect(result.candidates.C2?.audioUrl).toBe("https://api.example.com/audio/c2.wav");
-    expect(result.candidates.C2?.guardScore).toBe(0.91);
-    expect(result.transcription).toBe("enhanced");
-    expect(result.analysis.snrDb).toBe(6.4);
-    expect(Object.keys(result.candidates)).not.toContain("X9");
+    expect(result.candidates.C0?.transcript).toBe("[MOCK] original fixture");
+    expect(result.candidates.C2?.audioUrl).toBe("https://api.example.com/api/clips/mock/C2");
+    expect(result.transcription).toBe("[MOCK] enhanced fixture");
   });
-  it("rejects a response without transcripts or candidates", () => {
-    expect(() => normalizeProcessingResult({ status: "ok" })).toThrow();
+  it("rejects missing and malformed response fields with a readable error", () => {
+    expect(() => normalizeProcessingResult({ status: "ok" })).toThrow(/POST \/process response does not match/);
+    expect(() => normalizeProcessingResult({
+      request_id: "id",
+      selected_candidate: "C9",
+      transcription: "",
+      candidates: {},
+      analysis: {},
+      evaluation: {},
+      pipeline: [],
+      latency_ms: 1,
+      router_fitted: false,
+      suppression_fitted: null,
+    })).toThrow(/selected_candidate/);
   });
 });
 
@@ -67,17 +105,36 @@ describe("live socket", () => {
     expect(parseLiveMessage('{"type":"partial","text":"haan"}')).toEqual({ type: "transcript", text: "haan", final: false, candidate: undefined });
     expect(parseLiveMessage('{"type":"final","text":"haan ji","candidate":"C1"}')).toEqual({ type: "transcript", text: "haan ji", final: true, candidate: "C1" });
     expect(parseLiveMessage('{"type":"metrics","latency_ms":182,"snr_db":7.5}')).toMatchObject({ latencyMs: 182, snrDb: 7.5 });
-    expect(parseLiveMessage("not json")).toBeNull();
+    expect(parseLiveMessage('{"type":"connected","config":{"sample_rate":8000}}')).toEqual({
+      type: "connected", config: { sample_rate: 8000 },
+    });
+    expect(parseLiveMessage('{"type":"transcript","text":"[MOCK] segment fixture","segment_index":1,"latency":12}')).toMatchObject({
+      type: "transcript", text: "[MOCK] segment fixture", final: true, segmentIndex: 1, latencyMs: 12,
+    });
+    expect(() => parseLiveMessage("not json")).toThrow(/invalid JSON/);
   });
 });
 
 describe("evaluation report", () => {
   it("reads sections with fractional WER/CER", () => {
     const report = parseEvaluationReport({ dataset: "dev", clip_count: 120, sections: { comparison: [{ id: "A", pipeline: "C0", wer: 0.2, cer: 0.1, latency_ms: 400, candidate: "C0" }] } });
+    expect(report.available).toBe(true);
     expect(report.clipCount).toBe(120);
     expect(report.sections.comparison?.[0]).toMatchObject({ id: "A", wer: 0.2, latencyMs: 400 });
   });
   it("rejects files without sections", () => {
     expect(() => parseEvaluationReport({ rows: [] })).toThrow();
+  });
+  it("accepts the explicit no-results response", () => {
+    const report = parseEvaluationReport({
+      available: false,
+      reason: "No benchmark results have been generated yet.",
+      dataset: null,
+      clip_count: null,
+      measured_at: null,
+      sections: { comparison: [], ablation: [], snr: [], noise: [] },
+    });
+    expect(report.available).toBe(false);
+    expect(report.sections.comparison).toEqual([]);
   });
 });

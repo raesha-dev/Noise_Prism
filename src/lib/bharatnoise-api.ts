@@ -10,12 +10,12 @@ export const TRACK_IDS = ["C0", "C1", "C2", "C3"] as const;
 export type TrackId = (typeof TRACK_IDS)[number];
 
 export type CandidateResult = {
-  transcript?: string | undefined;
-  audioUrl?: string | undefined;
-  peaks?: number[] | undefined;
-  guardScore?: number | undefined;
-  confidence?: number | undefined;
-  snrDb?: number | undefined;
+  transcript?: string | null | undefined;
+  audioUrl?: string | null | undefined;
+  peaks?: number[] | null | undefined;
+  guardScore?: number | null | undefined;
+  confidence?: number | null | undefined;
+  snrDb?: number | null | undefined;
 };
 
 export type ProcessingResult = {
@@ -37,14 +37,16 @@ export type ProcessingResult = {
   latencyMs?: number | undefined;
 };
 
-export type HealthInfo = { status: string; gnaniConfigured?: boolean | undefined; version?: string | undefined; latencyMs: number };
+export type HealthInfo = { status: string; gnaniConfigured: boolean; version: string; latencyMs: number };
 
-export type EvaluationRow = { id: string; pipeline: string; wer?: number | undefined; cer?: number | undefined; latencyMs?: number | undefined; candidate?: string | undefined };
+export type EvaluationRow = { id: string; pipeline: string; wer?: number | null | undefined; cer?: number | null | undefined; latencyMs?: number | null | undefined; candidate?: string | null | undefined };
 export type EvaluationSection = "comparison" | "ablation" | "snr" | "noise";
 export type EvaluationReport = {
-  dataset?: string | undefined;
-  clipCount?: number | undefined;
-  measuredAt?: string | undefined;
+  available: boolean;
+  reason?: string | null | undefined;
+  dataset?: string | null | undefined;
+  clipCount?: number | null | undefined;
+  measuredAt?: string | null | undefined;
   sections: Partial<Record<EvaluationSection, EvaluationRow[] | undefined>>;
 };
 
@@ -91,9 +93,17 @@ export function saveApiBaseUrl(value: string): string {
 }
 
 async function readError(response: Response): Promise<string> {
-  const payload = (await response.json().catch(() => null)) as { detail?: unknown | undefined; message?: unknown | undefined; error?: unknown } | null;
+  const payload = (await response.json().catch(() => null)) as {
+    detail?: unknown | undefined;
+    message?: unknown | undefined;
+    error?: unknown;
+  } | null;
   for (const value of [payload?.detail, payload?.message, payload?.error]) {
     if (typeof value === "string") return value;
+  }
+  const error = payload?.error;
+  if (typeof error === "object" && error !== null && "message" in error && typeof error.message === "string") {
+    return error.message;
   }
   if (Array.isArray(payload?.detail)) return "The audio service rejected the request fields (422).";
   return `The audio service returned ${response.status}.`;
@@ -124,51 +134,61 @@ function describeFetchError(error: unknown, timeoutMs: number): Error {
   return error instanceof Error ? error : new Error("The audio service request failed.");
 }
 
-const num = z.coerce.number().finite().optional().catch(undefined);
-const str = z.string().optional().catch(undefined);
+const num = z.number().finite();
+const nullableNum = num.nullable();
+const nullableStr = z.string().nullable();
 
-const candidateSchema = z.union([
-  z.string().transform((transcript) => ({ transcript })),
-  z
-    .object({
-      transcript: str, text: str, audio_url: str, peaks: z.array(z.number()).optional().catch(undefined),
-      guard_score: num, confidence: num, snr_db: num,
-    })
-    .passthrough()
-    .transform((value) => ({
-      transcript: value.transcript ?? value.text,
-      audioUrl: value.audio_url,
-      peaks: value.peaks,
-      guardScore: value.guard_score,
-      confidence: value.confidence,
-      snrDb: value.snr_db,
-    })),
-]);
+const candidateSchema = z.object({
+  transcript: nullableStr,
+  audio_url: nullableStr,
+  peaks: z.array(num),
+  guard_score: nullableNum,
+  confidence: nullableNum,
+  snr_db: nullableNum,
+}).strict().transform((value) => ({
+  transcript: value.transcript,
+  audioUrl: value.audio_url,
+  peaks: value.peaks,
+  guardScore: value.guard_score,
+  confidence: value.confidence,
+  snrDb: value.snr_db,
+}));
 
-const resultSchema = z
-  .object({
-    request_id: str,
-    selected_candidate: str,
-    transcription: str,
-    candidates: z.record(z.string(), candidateSchema).optional().catch(undefined),
-    analysis: z
-      .object({
-        snr_db: num, noise_floor_db: num, speech_energy_db: num, guard_score: num, guard_status: str,
-        vad_segments: z.array(z.tuple([z.number(), z.number()])).optional().catch(undefined),
-        spectrum: z.array(z.number()).optional().catch(undefined),
-      })
-      .passthrough()
-      .optional()
-      .catch(undefined),
-    evaluation: z
-      .object({ wer: num, cer: num, latency_ms: num, calls: num, note: str })
-      .passthrough()
-      .optional()
-      .catch(undefined),
-    pipeline: z.array(z.string()).optional().catch(undefined),
-    latency_ms: num,
-  })
-  .passthrough();
+const analysisSchema = z.object({
+  snr_db: nullableNum,
+  noise_floor_db: nullableNum,
+  speech_energy_db: nullableNum,
+  vad_segments: z.array(z.tuple([num, num])),
+  guard_status: nullableStr,
+  guard_result: z.record(z.string(), z.unknown()).nullable(),
+  spectrum: z.array(num),
+}).strict();
+
+const serviceEvaluationSchema = z.object({
+  wer: nullableNum,
+  cer: nullableNum,
+  latency_ms: nullableNum,
+  calls: z.number().int().nullable(),
+  note: nullableStr,
+}).strict();
+
+const resultSchema = z.object({
+  request_id: z.string().min(1),
+  selected_candidate: z.enum(TRACK_IDS),
+  transcription: z.string(),
+  candidates: z.record(z.enum(TRACK_IDS), candidateSchema),
+  analysis: analysisSchema,
+  evaluation: serviceEvaluationSchema,
+  pipeline: z.array(z.string()),
+  latency_ms: num,
+  router_fitted: z.boolean(),
+  suppression_fitted: z.boolean().nullable(),
+}).strict();
+
+function responseShapeError(label: string, issues: { path: PropertyKey[] }[]): Error {
+  const paths = issues.map((issue) => issue.path.map(String).join(".") || "(root)");
+  return new Error(`${label} response does not match the workstation contract${paths.length ? `: ${paths.join(", ")}` : "."}`);
+}
 
 export function asTrackId(value: unknown): TrackId | undefined {
   const upper = typeof value === "string" ? value.trim().toUpperCase() : "";
@@ -188,16 +208,16 @@ export function resolveServiceUrl(baseUrl: string, value?: string): string | und
 /** Normalizes a POST /process JSON body. Throws when the body is not a usable result. */
 export function normalizeProcessingResult(raw: unknown, baseUrl = ""): ProcessingResult {
   const parsed = resultSchema.safeParse(raw);
-  if (!parsed.success) throw new Error("The audio service returned a response this workstation cannot read.");
+  if (!parsed.success) throw responseShapeError("POST /process", parsed.error.issues);
   const body = parsed.data;
   const candidates: ProcessingResult["candidates"] = {};
-  for (const [key, value] of Object.entries(body.candidates ?? {})) {
+  for (const [key, value] of Object.entries(body.candidates)) {
     const id = asTrackId(key);
     if (!id) continue;
-    candidates[id] = { ...value, audioUrl: resolveServiceUrl(baseUrl, "audioUrl" in value ? value.audioUrl : undefined) };
+    candidates[id] = { ...value, audioUrl: resolveServiceUrl(baseUrl, value.audioUrl ?? undefined) };
   }
   const selectedCandidate = asTrackId(body.selected_candidate);
-  if (!selectedCandidate && !body.transcription && Object.keys(candidates).length === 0) {
+  if (!selectedCandidate || (!body.transcription && Object.keys(candidates).length === 0)) {
     throw new Error("The audio service response had no transcript or candidates.");
   }
   return {
@@ -206,18 +226,22 @@ export function normalizeProcessingResult(raw: unknown, baseUrl = ""): Processin
     transcription: body.transcription ?? (selectedCandidate ? candidates[selectedCandidate]?.transcript : undefined),
     candidates,
     analysis: {
-      snrDb: body.analysis?.snr_db,
-      noiseFloorDb: body.analysis?.noise_floor_db,
-      speechEnergyDb: body.analysis?.speech_energy_db,
-      guardScore: body.analysis?.guard_score,
-      guardStatus: body.analysis?.guard_status,
-      vadSegments: body.analysis?.vad_segments ?? [],
-      spectrum: body.analysis?.spectrum,
+      snrDb: body.analysis.snr_db ?? undefined,
+      noiseFloorDb: body.analysis.noise_floor_db ?? undefined,
+      speechEnergyDb: body.analysis.speech_energy_db ?? undefined,
+      guardScore: undefined,
+      guardStatus: body.analysis.guard_status ?? undefined,
+      vadSegments: body.analysis.vad_segments,
+      spectrum: body.analysis.spectrum,
     },
-    evaluation: body.evaluation
-      ? { wer: body.evaluation.wer, cer: body.evaluation.cer, latencyMs: body.evaluation.latency_ms, calls: body.evaluation.calls, note: body.evaluation.note }
-      : undefined,
-    pipeline: body.pipeline ?? [],
+    evaluation: {
+      wer: body.evaluation.wer ?? undefined,
+      cer: body.evaluation.cer ?? undefined,
+      latencyMs: body.evaluation.latency_ms ?? undefined,
+      calls: body.evaluation.calls ?? undefined,
+      note: body.evaluation.note ?? undefined,
+    },
+    pipeline: body.pipeline,
     latencyMs: body.latency_ms,
   };
 }
@@ -246,11 +270,16 @@ export async function checkApiConnection(baseUrl: string): Promise<HealthInfo> {
   try {
     const response = await fetch(`${baseUrl}/health`, { headers: { Accept: "application/json" }, signal: timeout.signal });
     if (!response.ok) throw new Error(await readError(response));
-    const body = (await response.json().catch(() => ({}))) as { status?: unknown | undefined; gnani_configured?: unknown | undefined; version?: unknown };
+    const parsed = z.object({
+      status: z.string(),
+      gnani_configured: z.boolean(),
+      version: z.string(),
+    }).strict().safeParse(await response.json());
+    if (!parsed.success) throw responseShapeError("GET /health", parsed.error.issues);
     return {
-      status: typeof body.status === "string" ? body.status : "ok",
-      gnaniConfigured: typeof body.gnani_configured === "boolean" ? body.gnani_configured : undefined,
-      version: typeof body.version === "string" ? body.version : undefined,
+      status: parsed.data.status,
+      gnaniConfigured: parsed.data.gnani_configured,
+      version: parsed.data.version,
       latencyMs: Math.round(performance.now() - started),
     };
   } catch (error) {
@@ -281,31 +310,64 @@ export async function processAudioFile(baseUrl: string, file: File, options: Pro
   }
 }
 
-const rowSchema = z
-  .object({
-    id: z.union([z.string(), z.number()]).transform(String),
-    pipeline: z.string(),
-    wer: num, cer: num, latency_ms: num, candidate: str,
-  })
-  .transform((row) => ({ id: row.id, pipeline: row.pipeline, wer: row.wer, cer: row.cer, latencyMs: row.latency_ms, candidate: row.candidate }));
+const rowSchema = z.object({
+  id: z.union([z.string(), z.number()]).transform(String),
+  pipeline: z.string(),
+  wer: nullableNum.optional(),
+  cer: nullableNum.optional(),
+  latency_ms: nullableNum.optional(),
+  candidate: z.string().nullable().optional(),
+}).strict().transform((row) => ({
+  id: row.id,
+  pipeline: row.pipeline,
+  wer: row.wer,
+  cer: row.cer,
+  latencyMs: row.latency_ms,
+  candidate: row.candidate,
+}));
+
+const reportSectionsSchema = z.object({
+  comparison: z.array(rowSchema).optional(),
+  ablation: z.array(rowSchema).optional(),
+  snr: z.array(rowSchema).optional(),
+  noise: z.array(rowSchema).optional(),
+}).strict();
 
 const reportSchema = z.object({
-  dataset: str,
-  clip_count: num,
-  measured_at: str,
+  available: z.boolean().optional(),
+  reason: z.string().nullable().optional(),
+  dataset: z.string().nullable().optional(),
+  clip_count: z.number().int().nullable().optional(),
+  measured_at: z.string().nullable().optional(),
+  sections: reportSectionsSchema,
+}).strict();
+
+const evaluationResponseSchema = z.object({
+  available: z.boolean(),
+  reason: z.string().nullable(),
+  dataset: z.string().nullable(),
+  clip_count: z.number().int().nullable(),
+  measured_at: z.string().nullable(),
   sections: z.object({
-    comparison: z.array(rowSchema).optional(),
-    ablation: z.array(rowSchema).optional(),
-    snr: z.array(rowSchema).optional(),
-    noise: z.array(rowSchema).optional(),
-  }),
-});
+    comparison: z.array(rowSchema),
+    ablation: z.array(rowSchema),
+    snr: z.array(rowSchema),
+    noise: z.array(rowSchema),
+  }).strict(),
+}).strict();
 
 /** Parses an evaluation report (GET /evaluation or an imported JSON file). WER/CER are fractions 0–1. */
 export function parseEvaluationReport(raw: unknown): EvaluationReport {
   const parsed = reportSchema.safeParse(raw);
-  if (!parsed.success) throw new Error("This evaluation file does not match the expected format (sections → rows with id, pipeline, wer, cer).");
-  return { dataset: parsed.data.dataset, clipCount: parsed.data.clip_count, measuredAt: parsed.data.measured_at, sections: parsed.data.sections };
+  if (!parsed.success) throw responseShapeError("Evaluation", parsed.error.issues);
+  return {
+    available: parsed.data.available ?? true,
+    reason: parsed.data.reason,
+    dataset: parsed.data.dataset,
+    clipCount: parsed.data.clip_count,
+    measuredAt: parsed.data.measured_at,
+    sections: parsed.data.sections,
+  };
 }
 
 export async function fetchEvaluation(baseUrl: string): Promise<EvaluationReport> {
@@ -313,7 +375,17 @@ export async function fetchEvaluation(baseUrl: string): Promise<EvaluationReport
   try {
     const response = await fetch(`${baseUrl}/evaluation`, { headers: { Accept: "application/json" }, signal: timeout.signal });
     if (!response.ok) throw new Error(await readError(response));
-    return parseEvaluationReport(await response.json());
+    const raw = await response.json();
+    const parsed = evaluationResponseSchema.safeParse(raw);
+    if (!parsed.success) throw responseShapeError("GET /evaluation", parsed.error.issues);
+    return {
+      available: parsed.data.available,
+      reason: parsed.data.reason,
+      dataset: parsed.data.dataset,
+      clipCount: parsed.data.clip_count,
+      measuredAt: parsed.data.measured_at,
+      sections: parsed.data.sections,
+    };
   } catch (error) {
     throw describeFetchError(error, 15_000);
   } finally {
@@ -330,28 +402,72 @@ export function makeLiveSocketUrl(baseUrl: string): string {
 }
 
 export type LiveMessage =
-  | { type: "transcript"; text: string; final: boolean; candidate?: TrackId | undefined }
+  | { type: "connected"; config?: Record<string, unknown> | undefined }
+  | { type: "speech_start" }
+  | { type: "processing" }
+  | { type: "transcript"; text: string; final: boolean; audioDurationMs?: number | undefined; segmentIndex?: number | undefined; latencyMs?: number | undefined; detectedLanguageCode?: string | undefined; candidate?: TrackId | undefined }
   | { type: "metrics"; snrDb?: number | undefined; latencyMs?: number | undefined; candidate?: TrackId | undefined }
   | { type: "error"; message: string };
 
-/** Parses one JSON text message from WS /live. Unknown messages return null. */
-export function parseLiveMessage(data: unknown): LiveMessage | null {
-  if (typeof data !== "string") return null;
-  type RawLive = { type?: unknown; text?: unknown; final?: unknown; candidate?: unknown; snr_db?: unknown; latency_ms?: unknown; message?: unknown };
-  let body: RawLive;
+/** Validates one JSON text message relayed by the backend's Gnani WebSocket proxy. */
+export function parseLiveMessage(data: unknown): LiveMessage {
+  if (typeof data !== "string") throw new Error("The live proxy sent a non-text response.");
+  let raw: unknown;
   try {
-    body = JSON.parse(data) as RawLive;
-  } catch {
-    return null;
+    raw = JSON.parse(data);
+  } catch (error) {
+    throw new Error("The live proxy sent invalid JSON.", { cause: error });
   }
-  const candidate = asTrackId(body.candidate);
-  if ((body.type === "partial" || body.type === "final" || body.type === "transcript") && typeof body.text === "string") {
-    return { type: "transcript", text: body.text, final: body.type === "final" || body.final === true, candidate };
+  const envelope = z.object({ type: z.string() }).passthrough().safeParse(raw);
+  if (!envelope.success) throw responseShapeError("WS /live", envelope.error.issues);
+  const body = envelope.data;
+  if (body.type === "connected") {
+    const parsed = z.object({ type: z.literal("connected"), config: z.record(z.string(), z.unknown()).optional() }).passthrough().safeParse(body);
+    if (!parsed.success) throw responseShapeError("WS /live connected", parsed.error.issues);
+    return { type: "connected", config: parsed.data.config };
+  }
+  if (body.type === "speech_start" || body.type === "processing") return { type: body.type };
+  if (body.type === "transcript" || body.type === "partial" || body.type === "final") {
+    const parsed = z.object({
+      type: z.enum(["transcript", "partial", "final"]),
+      text: z.string(),
+      audio_duration_ms: num.optional(),
+      segment_index: z.number().int().optional(),
+      latency: num.optional(),
+      detected_language_code: z.string().optional(),
+      final: z.boolean().optional(),
+      candidate: z.string().optional(),
+    }).passthrough().safeParse(body);
+    if (!parsed.success) throw responseShapeError("WS /live transcript", parsed.error.issues);
+    return {
+      type: "transcript",
+      text: parsed.data.text,
+      final: parsed.data.type === "final" || parsed.data.final === true || parsed.data.type === "transcript",
+      audioDurationMs: parsed.data.audio_duration_ms,
+      segmentIndex: parsed.data.segment_index,
+      latencyMs: parsed.data.latency,
+      detectedLanguageCode: parsed.data.detected_language_code,
+      candidate: asTrackId(parsed.data.candidate),
+    };
   }
   if (body.type === "metrics") {
-    const n = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : undefined);
-    return { type: "metrics", snrDb: n(body.snr_db), latencyMs: n(body.latency_ms), candidate };
+    const parsed = z.object({
+      type: z.literal("metrics"),
+      snr_db: num.optional(),
+      latency_ms: num.optional(),
+      candidate: z.string().optional(),
+    }).passthrough().safeParse(body);
+    if (!parsed.success) throw responseShapeError("WS /live metrics", parsed.error.issues);
+    return { type: "metrics", snrDb: parsed.data.snr_db, latencyMs: parsed.data.latency_ms, candidate: asTrackId(parsed.data.candidate) };
   }
-  if (body.type === "error") return { type: "error", message: typeof body.message === "string" ? body.message : "The live proxy reported an error." };
-  return null;
+  if (body.type === "error") {
+    const parsed = z.object({
+      type: z.literal("error"),
+      message: z.string().optional(),
+      error: z.string().optional(),
+    }).passthrough().safeParse(body);
+    if (!parsed.success) throw responseShapeError("WS /live error", parsed.error.issues);
+    return { type: "error", message: parsed.data.message ?? parsed.data.error ?? "The live proxy reported an error." };
+  }
+  throw new Error(`The live proxy sent unsupported message type "${body.type}".`);
 }
