@@ -40,10 +40,10 @@ describe("demo SNR router", () => {
   });
 });
 
-import { encodeWav, readWavHeader } from "@/lib/audio-utils";
+import { encodeWavBuffer, readWavHeader } from "@/lib/audio-utils";
 describe("WAV header", () => {
   it("reports the file's own 8 kHz mono format", async () => {
-    const bytes = await encodeWav(new Float32Array(800), 8000).arrayBuffer();
+    const bytes = encodeWavBuffer(new Float32Array(800), 8000);
     expect(readWavHeader(bytes)).toEqual({ sampleRate: 8000, channels: 1 });
   });
 });

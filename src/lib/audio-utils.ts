@@ -169,6 +169,10 @@ export async function decodeToMono(file: Blob): Promise<{ samples: Float32Array;
 }
 
 export function encodeWav(samples: Float32Array, sampleRate: number): Blob {
+  return new Blob([encodeWavBuffer(samples, sampleRate)], { type: "audio/wav" });
+}
+
+export function encodeWavBuffer(samples: Float32Array, sampleRate: number): ArrayBuffer {
   const buffer = new ArrayBuffer(44 + samples.length * 2);
   const view = new DataView(buffer);
   const write = (offset: number, text: string) => [...text].forEach((ch, i) => view.setUint8(offset + i, ch.charCodeAt(0)));
@@ -186,7 +190,7 @@ export function encodeWav(samples: Float32Array, sampleRate: number): Blob {
   write(36, "data");
   view.setUint32(40, samples.length * 2, true);
   samples.forEach((value, i) => view.setInt16(44 + i * 2, Math.max(-32768, Math.min(32767, Math.round(value * 32767))), true));
-  return new Blob([buffer], { type: "audio/wav" });
+  return buffer;
 }
 
 export type SampleKind = "call" | "street" | "quiet";
