@@ -49,15 +49,16 @@ class FakeClient:
         self.texts, self.ok, self.raises, self.calls = texts or {}, ok, raises, []
 
     def transcribe(self, path, language, *, model="v2.5", fmt="verbatim", run_id=0, extra=None, use_cache=True):
+        started = time.monotonic()
         if self.raises:
             raise self.raises
         variant = Path(path).stem
         self.calls.append((variant, model, language))
         if not self.ok:
             return Transcript(ok=False, error="HTTP 400 EMPTY_AUDIO: nothing")
-        text = self.texts.get((variant, model), "नमस्ते दुनिया")
-        return Transcript(ok=True, text=text, model=f"prisma-{model}", end_to_end_latency=0.4,
-                          wall_seconds=0.45, audio_seconds=2.0)
+        text = self.texts.get((variant, model), "[MOCK] test utterance")
+        return Transcript(ok=True, text=text, model=f"mock-prisma-{model}",
+                          wall_seconds=time.monotonic() - started)
 
 
 def make_app(tmp_path, fake=None, **overrides):
@@ -94,8 +95,10 @@ def test_health_and_config(tmp_path):
         assert c.get("/api/health").json()["ok"] is True
         legacy_health = c.get("/health")
         assert legacy_health.status_code == 200
-        assert set(legacy_health.json()) == {"status", "gnani_configured", "version"}
+        assert set(legacy_health.json()) == {"status", "gnani_configured", "version", "gnani_mode"}
+        assert legacy_health.json()["gnani_mode"] == "mock"
         cfg = c.get("/api/config").json()
+        assert cfg["gnani_mode"] == "mock"
         avail = {x["id"]: x["available"] for x in cfg["candidates"]}
         assert avail == {"C0": True, "C1": True, "C2": True, "C3": False}
         assert {m["id"] for m in cfg["modes"]} == {"raw", "fast", "accuracy", "compare_all"}
@@ -225,10 +228,14 @@ def test_raw_job_with_score(tmp_path):
     app, fake = make_app(tmp_path)
     with TestClient(app) as c:
         cid = upload(c).json()["clip_id"]
-        j = run_job(c, cid, mode="raw", language="hi-IN", model="v2.5", reference="नमस्ते दुनिया")
+        j = run_job(c, cid, mode="raw", language="hi-IN", model="v2.5", reference="[MOCK] test utterance")
         assert j["status"] == "done", j
         res = j["result"]
-        assert res["chosen"]["variant"] == "C0" and res["chosen"]["score"]["wer"] == 0.0
+        assert res["chosen"]["variant"] == "C0"
+        assert res["chosen"]["score"] is None
+        assert res["score_suppressed_reason"] == "mock"
+        assert res["model"] == "mock-prisma-v2.5"
+        assert res["chosen"]["text"].startswith("[MOCK]")
         assert res["api_calls"] == 1 and fake.calls == [("C0", "v2.5", "hi-IN")]
         assert j["steps"]
 
@@ -270,8 +277,9 @@ def test_frontend_process_contract_and_measured_scores(tmp_path):
         result = response.json()
         assert result["selected_candidate"] in {"C0", "C1", "C2"}
         assert set(result) == {
-            "request_id", "selected_candidate", "transcription", "candidates", "analysis",
+            "request_id", "gnani_mode", "selected_candidate", "transcription", "candidates", "analysis",
             "evaluation", "pipeline", "latency_ms", "router_fitted", "suppression_fitted",
+            "score_suppressed_reason",
         }
         assert set(result["candidates"][result["selected_candidate"]]) == {
             "transcript", "audio_url", "peaks", "guard_score", "confidence", "snr_db",
@@ -280,7 +288,8 @@ def test_frontend_process_contract_and_measured_scores(tmp_path):
             "snr_db", "noise_floor_db", "speech_energy_db", "vad_segments", "guard_status",
             "guard_result", "spectrum",
         }
-        assert result["candidates"][result["selected_candidate"]]["transcript"] == "नमस्ते दुनिया"
+        assert result["gnani_mode"] == "mock"
+        assert result["candidates"][result["selected_candidate"]]["transcript"].startswith("[MOCK]")
         assert result["candidates"][result["selected_candidate"]]["audio_url"].startswith("/api/clips/")
         assert result["evaluation"]["calls"] == 1
         assert result["evaluation"]["wer"] is None
@@ -290,12 +299,13 @@ def test_frontend_process_contract_and_measured_scores(tmp_path):
         body.update({"mode": "max", "selection": "consensus"})
         response = c.post(
             "/process", files={"file": ("sample.wav", speechy_wav(), "audio/wav")},
-            data={**body, "reference": "नमस्ते दुनिया"},
+            data={**body, "reference": "[MOCK] test utterance"},
         )
         assert response.status_code == 200, response.text
         result = response.json()
         assert result["selected_candidate"] in {"C0", "C1", "C2"}
-        assert result["evaluation"]["wer"] == 0.0
+        assert result["evaluation"]["wer"] is None
+        assert result["score_suppressed_reason"] == "mock"
         assert result["evaluation"]["calls"] == 3
 
 
@@ -359,8 +369,8 @@ def test_build_eval_set_meets_snr_and_speaker_split(tmp_path):
 
 def test_accuracy_job_picks_consensus(tmp_path):
     texts = {
-        ("C0", "v2.5"): "z y x w", ("C1", "v2.5"): "a b c d", ("C2", "v2.5"): "a b c d",
-        ("C0", "v3.0"): "a b c d", ("C1", "v3.0"): "a b c d", ("C2", "v3.0"): "a b c d",
+        ("C0", "v2.5"): "[MOCK] outlier tokens", ("C1", "v2.5"): "[MOCK] consensus tokens", ("C2", "v2.5"): "[MOCK] consensus tokens",
+        ("C0", "v3.0"): "[MOCK] consensus tokens", ("C1", "v3.0"): "[MOCK] consensus tokens", ("C2", "v3.0"): "[MOCK] consensus tokens",
     }
     app, fake = make_app(tmp_path, FakeClient(texts))
     with TestClient(app) as c:
@@ -369,10 +379,13 @@ def test_accuracy_job_picks_consensus(tmp_path):
         assert j["status"] == "done", j
         res = j["result"]
         assert [h["key"] for h in res["hypotheses"]] == [
-            "C0@v2.5", "C1@v2.5", "C2@v2.5", "C0@v3.0", "C1@v3.0", "C2@v3.0"
+            "C0@mock-prisma-v2.5", "C1@mock-prisma-v2.5", "C2@mock-prisma-v2.5",
+            "C0@mock-prisma-v3.0", "C1@mock-prisma-v3.0", "C2@mock-prisma-v3.0"
         ]
-        assert res["chosen"]["key"] == "C1@v2.5" and res["chosen"]["text"] == "a b c d"   # outlier rejected, tie to earliest
-        assert res["decision"]["total_distance"]["C0@v2.5"] > res["decision"]["total_distance"]["C1@v3.0"]
+        assert res["chosen"]["key"] == "C1@mock-prisma-v2.5"
+        assert res["chosen"]["text"] == "[MOCK] consensus tokens"
+        assert res["decision"]["total_distance"]["C0@mock-prisma-v2.5"] > res["decision"]["total_distance"]["C1@mock-prisma-v3.0"]
+        assert res["score_suppressed_reason"] == "mock"
         assert len(fake.calls) == 6
 
 
@@ -381,7 +394,7 @@ def test_accuracy_ties_go_to_original(tmp_path):
     with TestClient(app) as c:
         cid = upload(c).json()["clip_id"]
         j = run_job(c, cid, mode="accuracy", language="hi-IN", model="v2.5")
-        assert j["result"]["chosen"]["key"] == "C0@v2.5"
+        assert j["result"]["chosen"]["key"] == "C0@mock-prisma-v2.5"
 
 
 def test_job_validation_and_budget(tmp_path):
@@ -417,6 +430,8 @@ def test_missing_key_gives_clear_error(tmp_path, monkeypatch):
     monkeypatch.delenv("GNANI_API_KEY", raising=False)
     s = Settings(workdir=tmp_path / "w", config_dir=HERE / "config", web_dir=tmp_path / "x", results_dir=tmp_path / "r")
     with TestClient(create_app(s)) as c:   # no client_factory: real client, no key
+        assert c.get("/api/health").json()["gnani_mode"] == "unconfigured"
+        assert c.get("/api/config").json()["gnani_mode"] == "unconfigured"
         cid = upload(c).json()["clip_id"]
         j = run_job(c, cid, mode="raw", language="hi-IN")
         assert j["status"] == "error" and j["error"]["code"] == "GNANI_KEY_MISSING"
@@ -492,8 +507,8 @@ class FakeUpstream:
                     else:
                         self.texts.append(msg)
                         if json.loads(msg).get("type") == "commit":
-                            await ws.send(json.dumps({"type": "transcript", "text": "नमस्ते दुनिया",
-                                                      "segment_index": 1, "latency": 123}))
+                            await ws.send(json.dumps({"type": "transcript", "text": "[MOCK] segment fixture",
+                                                      "segment_index": 1}))
 
             async def main():
                 from websockets.asyncio.server import serve

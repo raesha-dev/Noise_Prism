@@ -40,10 +40,10 @@ describe("POST /process request", () => {
 describe("GET /health response", () => {
   it("validates the documented fields and measures request latency locally", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      status: "ok", gnani_configured: false, version: "0.3.1",
+      status: "ok", gnani_configured: false, gnani_mode: "unconfigured", version: "0.3.1",
     }), { headers: { "Content-Type": "application/json" } })));
     await expect(checkApiConnection("http://localhost:8000")).resolves.toMatchObject({
-      status: "ok", gnaniConfigured: false, version: "0.3.1",
+      status: "ok", gnaniConfigured: false, gnaniMode: "unconfigured", version: "0.3.1",
     });
   });
   it("surfaces a malformed health response", async () => {
@@ -58,6 +58,8 @@ describe("POST /process response", () => {
   it("validates the backend response and resolves candidate audio URLs", () => {
     const result = normalizeProcessingResult({
       request_id: "mock-request",
+      gnani_mode: "mock",
+      score_suppressed_reason: "mock",
       selected_candidate: "C2",
       transcription: "[MOCK] enhanced fixture",
       candidates: {
@@ -80,6 +82,8 @@ describe("POST /process response", () => {
     expect(() => normalizeProcessingResult({ status: "ok" })).toThrow(/POST \/process response does not match/);
     expect(() => normalizeProcessingResult({
       request_id: "id",
+      gnani_mode: "mock",
+      score_suppressed_reason: "mock",
       selected_candidate: "C9",
       transcription: "",
       candidates: {},

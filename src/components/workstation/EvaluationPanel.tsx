@@ -139,5 +139,5 @@ export function EvaluationPanel({ report, onReport, reportSource, apiUrl, lastRe
 }
 
 function isMockResult(result: ProcessingResult | null): boolean {
-  return result?.transcription?.startsWith("[MOCK]") ?? false;
+  return result?.gnaniMode === "mock";
 }

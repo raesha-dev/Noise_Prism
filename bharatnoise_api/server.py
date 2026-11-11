@@ -43,12 +43,12 @@ from websockets.asyncio.client import connect as ws_connect
 try:
     from . import compare as cmp
     from . import pipeline as pl
-    from .gnani_client import FatalAPIError, GnaniClient, Transcript
+    from .gnani_client import FatalAPIError, GnaniClient, Transcript, endpoint_mode
     from .metrics import normalize, score_utterance
 except ImportError:
     import compare as cmp
     import pipeline as pl
-    from gnani_client import FatalAPIError, GnaniClient, Transcript
+    from gnani_client import FatalAPIError, GnaniClient, Transcript, endpoint_mode
     from metrics import normalize, score_utterance
 
 ROOT = Path(__file__).resolve().parent
@@ -155,6 +155,7 @@ class LegacyHealthResponse(BaseModel):
     status: str
     gnani_configured: bool
     version: str
+    gnani_mode: Literal["unconfigured", "live", "mock"]
 
 
 class ApiHealthResponse(LegacyHealthResponse):
@@ -193,6 +194,7 @@ class LegacyEvaluationResponse(BaseModel):
 
 class LegacyProcessResponse(BaseModel):
     request_id: str
+    gnani_mode: Literal["unconfigured", "live", "mock"]
     selected_candidate: Literal["C0", "C1", "C2", "C3"]
     transcription: str
     candidates: dict[str, LegacyCandidateResponse]
@@ -202,6 +204,7 @@ class LegacyProcessResponse(BaseModel):
     latency_ms: float
     router_fitted: bool
     suppression_fitted: bool | None
+    score_suppressed_reason: str | None = None
 
 
 class LegacyEvaluationRow(BaseModel):
@@ -290,6 +293,9 @@ def create_app(settings: Optional[Settings] = None,
     holder: dict[str, Any] = {"client": None, "queue": None}
     live_lock = asyncio.Lock()
 
+    def get_gnani_mode() -> str:
+        return "mock" if client_factory is not None else endpoint_mode()
+
     def get_client():
         if holder["client"] is None:
             try:
@@ -368,10 +374,15 @@ def create_app(settings: Optional[Settings] = None,
         note = t.note
         if variant == "C2" and not suppress_cfg.get("fitted", False):
             note = "; ".join(part for part in (note, "C2 suppression parameters are placeholders, not fitted.") if part)
-        return {"key": f"{variant}@{model}", "variant": variant, "model": model, "text": t.text, "ok": t.ok,
+        mode = get_gnani_mode()
+        model_name = f"mock-prisma-{model}" if mode == "mock" else model
+        if mode == "mock":
+            note = "; ".join(part for part in (note, "MOCK GNANI: this transcript is a placeholder, not Prisma output.") if part)
+        return {"key": f"{variant}@{model_name}", "variant": variant, "model": model_name, "text": t.text, "ok": t.ok,
                 "error": t.error, "note": note, "cached": t.cached, "api_latency_s": t.end_to_end_latency,
                 "wall_s": t.wall_seconds, "detected_language_code": t.detected_language_code,
-                "score": score_text(job.params.reference or clip.reference, t.text) if t.ok else None,
+                "score": score_text(job.params.reference or clip.reference, t.text) if t.ok and mode == "live" else None,
+                "score_suppressed_reason": "mock" if mode == "mock" else None,
                 "parameters_fitted": suppress_cfg.get("fitted", False) if variant == "C2" else None}
 
     async def run_job(job: Job) -> None:
@@ -414,10 +425,13 @@ def create_app(settings: Optional[Settings] = None,
             chosen = next((h for h in ok if h["variant"] == routed and h["model"] == p.model), ok[0])
 
         job.result = clean({
-            "mode": p.mode, "language": p.language, "model": p.model,
+            "mode": p.mode, "language": p.language,
+            "model": f"mock-prisma-{p.model}" if get_gnani_mode() == "mock" else p.model,
+            "gnani_mode": get_gnani_mode(),
             "chosen": {"key": chosen["key"], "variant": chosen["variant"], "model": chosen["model"],
                        "text": chosen["text"], "score": chosen["score"]},
             "hypotheses": hyps, "decision": decision,
+            "score_suppressed_reason": "mock" if get_gnani_mode() == "mock" else None,
             "suppression_fitted": bool(suppress_cfg.get("fitted", False)) if any(h["variant"] == "C2" for h in hyps) else None,
             "api_calls": sum(1 for h in hyps if not h["cached"]),
             "timing_ms": {
@@ -504,9 +518,10 @@ def create_app(settings: Optional[Settings] = None,
     @app.get("/api/health", response_model=ApiHealthResponse)
     def health():
         """Liveness plus whether the server can reach Gnani. Never returns secrets."""
-        configured = bool(os.environ.get("GNANI_API_KEY")) or client_factory is not None
+        mode = get_gnani_mode()
+        configured = mode != "unconfigured"
         return {"ok": True, "status": "ok", "gnani_configured": configured,
-                "gnani_key_configured": configured, "version": "0.3.1",
+                "gnani_key_configured": configured, "gnani_mode": mode, "version": "0.3.1",
                 "clips_in_memory": len(clips), "jobs_in_memory": len(jobs)}
 
     @app.get("/api/config")
@@ -524,6 +539,7 @@ def create_app(settings: Optional[Settings] = None,
             candidates.append({"id": "C3", "label": pl.PLANNED["C3"], "available": False,
                               "reason": neural_reason or pl.UNAVAILABLE_REASONS.get("C3")})
         return {
+            "gnani_mode": get_gnani_mode(),
             "languages": [{"code": c, "name": n} for c, n in LANGUAGES.items()],
             "models": list(MODELS),
             "modes": [{"id": k, "label": v} for k, v in MODES.items()],
@@ -532,8 +548,10 @@ def create_app(settings: Optional[Settings] = None,
             "router": {"fitted": bool(router_cfg["fitted"])},
             "suppression": {"fitted": bool(suppress_cfg.get("fitted", False))},
             "optional_features": {
-                "silero_vad": {"available": silero_available, "reason": silero_reason},
-                "deepfilternet": {"available": neural_available, "reason": neural_reason},
+                "silero_vad": {"available": silero_available, "reason": silero_reason,
+                               "install_hint": "python -m pip install silero-vad"},
+                "deepfilternet": {"available": neural_available, "reason": neural_reason,
+                                  "install_hint": "python -m pip install deepfilternet"},
             },
             "live": {"variants": ["C0", "C1"], "sample_rate": pl.SR, "frame_bytes": FRAME_BYTES,
                      "frame_ms": int(FRAME_SECONDS * 1000), "max_seconds": cfg.live_max_s},
@@ -708,8 +726,9 @@ def create_app(settings: Optional[Settings] = None,
             raise ApiError(status, error["code"], error["message"])
 
         result = job.result
+        requested_model_name = f"mock-prisma-{model}" if result["gnani_mode"] == "mock" else model
         requested_hypotheses = [
-            hyp for hyp in result["hypotheses"] if hyp["model"] == model and hyp["ok"]
+            hyp for hyp in result["hypotheses"] if hyp["model"] == requested_model_name and hyp["ok"]
         ]
         if mode == "max" and not compare_models:
             if len(requested_hypotheses) < 3:
@@ -759,6 +778,7 @@ def create_app(settings: Optional[Settings] = None,
         score = chosen.get("score")
         response = {
             "request_id": job.id,
+            "gnani_mode": result["gnani_mode"],
             "selected_candidate": chosen["variant"],
             "transcription": chosen["text"],
             "candidates": candidate_results,
@@ -767,11 +787,14 @@ def create_app(settings: Optional[Settings] = None,
                 **({"wer": score["wer"], "cer": score["cer"]} if score else {}),
                 "latency_ms": result["timing_ms"]["api_wall"],
                 "calls": result["api_calls"],
-                "note": "WER/CER computed against the supplied reference." if score else "No reference supplied; WER/CER were not measured.",
+                "note": "Mock scores are suppressed." if result["score_suppressed_reason"] else (
+                    "WER/CER computed against the supplied reference." if score else "No reference supplied; WER/CER were not measured."
+                ),
             },
             "pipeline": ["ingest", "vad_snr", "candidates", "guard", f"route:{chosen['variant']}", "transcribe"],
             "latency_ms": result["timing_ms"]["job_total"],
             "router_fitted": router_cfg["fitted"],
+            "score_suppressed_reason": result["score_suppressed_reason"],
             "suppression_fitted": suppress_cfg.get("fitted", False) if any(
                 hyp["variant"] == "C2" for hyp in result["hypotheses"]
             ) else None,
@@ -784,7 +807,8 @@ def create_app(settings: Optional[Settings] = None,
         job = jobs.get(job_id)
         if job is None:
             raise ApiError(404, "JOB_NOT_FOUND", "Unknown job.")
-        return {"job_id": job.id, "status": job.status, "steps": job.steps, "result": job.result, "error": job.error}
+        return {"job_id": job.id, "status": job.status, "steps": job.steps, "result": job.result,
+                "error": job.error, "gnani_mode": get_gnani_mode()}
 
     # --------------------------------------------------------------- scoring
     @app.post("/api/score", dependencies=[Depends(require_token)])

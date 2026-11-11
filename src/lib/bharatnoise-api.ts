@@ -20,6 +20,8 @@ export type CandidateResult = {
 
 export type ProcessingResult = {
   requestId?: string | undefined;
+  gnaniMode: "unconfigured" | "live" | "mock";
+  scoreSuppressedReason?: string | null | undefined;
   selectedCandidate?: TrackId | undefined;
   transcription?: string | undefined;
   candidates: Partial<Record<TrackId, CandidateResult>>;
@@ -37,7 +39,8 @@ export type ProcessingResult = {
   latencyMs?: number | undefined;
 };
 
-export type HealthInfo = { status: string; gnaniConfigured: boolean; version: string; latencyMs: number };
+export type GnaniMode = "unconfigured" | "live" | "mock";
+export type HealthInfo = { status: string; gnaniConfigured: boolean; gnaniMode: GnaniMode; version: string; latencyMs: number };
 
 export type EvaluationRow = { id: string; pipeline: string; wer?: number | null | undefined; cer?: number | null | undefined; latencyMs?: number | null | undefined; candidate?: string | null | undefined };
 export type EvaluationSection = "comparison" | "ablation" | "snr" | "noise";
@@ -174,6 +177,8 @@ const serviceEvaluationSchema = z.object({
 
 const resultSchema = z.object({
   request_id: z.string().min(1),
+  gnani_mode: z.enum(["unconfigured", "live", "mock"]),
+  score_suppressed_reason: z.string().nullable(),
   selected_candidate: z.enum(TRACK_IDS),
   transcription: z.string(),
   candidates: z.record(z.enum(TRACK_IDS), candidateSchema),
@@ -222,6 +227,8 @@ export function normalizeProcessingResult(raw: unknown, baseUrl = ""): Processin
   }
   return {
     requestId: body.request_id,
+    gnaniMode: body.gnani_mode,
+    scoreSuppressedReason: body.score_suppressed_reason ?? undefined,
     selectedCandidate,
     transcription: body.transcription ?? (selectedCandidate ? candidates[selectedCandidate]?.transcript : undefined),
     candidates,
@@ -273,12 +280,14 @@ export async function checkApiConnection(baseUrl: string): Promise<HealthInfo> {
     const parsed = z.object({
       status: z.string(),
       gnani_configured: z.boolean(),
-      version: z.string(),
+        gnani_mode: z.enum(["unconfigured", "live", "mock"]),
+        version: z.string(),
     }).strict().safeParse(await response.json());
     if (!parsed.success) throw responseShapeError("GET /health", parsed.error.issues);
     return {
       status: parsed.data.status,
       gnaniConfigured: parsed.data.gnani_configured,
+      gnaniMode: parsed.data.gnani_mode,
       version: parsed.data.version,
       latencyMs: Math.round(performance.now() - started),
     };
