@@ -292,7 +292,7 @@
 .service-status.pending > span { background: var(--wn-faint); }
 
 .workspace-content { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
-.studio-layout > *, .insight-layout > *, .bottom-layout > *, .transcript-card, .analysis-visual { min-width: 0; }
+.workbench-grid > *, .studio-layout > *, .insight-layout > *, .bottom-layout > *, .transcript-card, .analysis-visual { min-width: 0; }
 .file-chip { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .status-strip {
