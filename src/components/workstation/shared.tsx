@@ -29,7 +29,7 @@ export function formatTime(seconds: number) {
   return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
 }
 
-export const formatDb = (value?: number) => (value === undefined || !Number.isFinite(value) ? "—" : `${value.toFixed(1)} dB`) | undefined;
+export const formatDb = (value?: number) => (value === undefined || !Number.isFinite(value) ? "—" : `${value.toFixed(1)} dB`);
 
 /** Deterministic illustrative waveform used only when no clip is loaded. */
 export function illustrativePeaks(row: number, bins = 320): number[] {

@@ -8,7 +8,7 @@ import { SourceTag, WaveformPath, formatTime, trackDefs } from "./shared";
 export type TrackView = { id: TrackId; peaks: number[] | null; status: "real" | "service" | "sample" | "pending" | "skipped"; hasAudio: boolean };
 
 type Props = {
-  clip: { name: string; source: "upload" | "recording" | "sample"; sampleRate?: number | undefined; channels?: number | undefined } | null | undefined;
+  clip: { name: string; source: "upload" | "recording" | "sample"; sampleRate?: number | undefined; channels?: number | undefined } | null;
   analyzing: boolean;
   tracks: TrackView[];
   selected: TrackId;

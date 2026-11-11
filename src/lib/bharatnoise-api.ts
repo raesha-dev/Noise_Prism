@@ -39,7 +39,7 @@ export type ProcessingResult = {
 
 export type HealthInfo = { status: string; gnaniConfigured?: boolean | undefined; version?: string | undefined; latencyMs: number };
 
-export type EvaluationRow = { id: string; pipeline: string; wer?: number | undefined; cer?: number | undefined; latencyMs?: number | undefined; candidate?: string | undefined } | undefined;
+export type EvaluationRow = { id: string; pipeline: string; wer?: number | undefined; cer?: number | undefined; latencyMs?: number | undefined; candidate?: string | undefined };
 export type EvaluationSection = "comparison" | "ablation" | "snr" | "noise";
 export type EvaluationReport = {
   dataset?: string | undefined;
@@ -91,7 +91,7 @@ export function saveApiBaseUrl(value: string): string {
 }
 
 async function readError(response: Response): Promise<string> {
-  const payload = (await response.json().catch(() => null)) as { detail?: unknown | undefined; message?: unknown | undefined; error?: unknown } | null | undefined;
+  const payload = (await response.json().catch(() => null)) as { detail?: unknown | undefined; message?: unknown | undefined; error?: unknown } | null;
   for (const value of [payload?.detail, payload?.message, payload?.error]) {
     if (typeof value === "string") return value;
   }
@@ -246,7 +246,7 @@ export async function checkApiConnection(baseUrl: string): Promise<HealthInfo> {
   try {
     const response = await fetch(`${baseUrl}/health`, { headers: { Accept: "application/json" }, signal: timeout.signal });
     if (!response.ok) throw new Error(await readError(response));
-    const body = (await response.json().catch(() => ({}))) as { status?: unknown | undefined; gnani_configured?: unknown | undefined; version?: unknown } | undefined;
+    const body = (await response.json().catch(() => ({}))) as { status?: unknown | undefined; gnani_configured?: unknown | undefined; version?: unknown };
     return {
       status: typeof body.status === "string" ? body.status : "ok",
       gnaniConfigured: typeof body.gnani_configured === "boolean" ? body.gnani_configured : undefined,
