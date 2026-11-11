@@ -10,41 +10,41 @@ export const TRACK_IDS = ["C0", "C1", "C2", "C3"] as const;
 export type TrackId = (typeof TRACK_IDS)[number];
 
 export type CandidateResult = {
-  transcript?: string;
-  audioUrl?: string;
-  peaks?: number[];
-  guardScore?: number;
-  confidence?: number;
-  snrDb?: number;
+  transcript?: string | undefined;
+  audioUrl?: string | undefined;
+  peaks?: number[] | undefined;
+  guardScore?: number | undefined;
+  confidence?: number | undefined;
+  snrDb?: number | undefined;
 };
 
 export type ProcessingResult = {
-  requestId?: string;
-  selectedCandidate?: TrackId;
-  transcription?: string;
+  requestId?: string | undefined;
+  selectedCandidate?: TrackId | undefined;
+  transcription?: string | undefined;
   candidates: Partial<Record<TrackId, CandidateResult>>;
   analysis: {
-    snrDb?: number;
-    noiseFloorDb?: number;
-    speechEnergyDb?: number;
+    snrDb?: number | undefined;
+    noiseFloorDb?: number | undefined;
+    speechEnergyDb?: number | undefined;
     vadSegments: [number, number][];
-    guardScore?: number;
-    guardStatus?: string;
-    spectrum?: number[];
+    guardScore?: number | undefined;
+    guardStatus?: string | undefined;
+    spectrum?: number[] | undefined;
   };
-  evaluation?: { wer?: number; cer?: number; latencyMs?: number; calls?: number; note?: string };
+  evaluation?: { wer?: number | undefined; cer?: number | undefined; latencyMs?: number | undefined; calls?: number | undefined; note?: string | undefined } | undefined;
   pipeline: string[];
-  latencyMs?: number;
+  latencyMs?: number | undefined;
 };
 
-export type HealthInfo = { status: string; gnaniConfigured?: boolean; version?: string; latencyMs: number };
+export type HealthInfo = { status: string; gnaniConfigured?: boolean | undefined; version?: string | undefined; latencyMs: number };
 
-export type EvaluationRow = { id: string; pipeline: string; wer?: number; cer?: number; latencyMs?: number; candidate?: string };
+export type EvaluationRow = { id: string; pipeline: string; wer?: number | undefined; cer?: number | undefined; latencyMs?: number | undefined; candidate?: string | undefined } | undefined;
 export type EvaluationSection = "comparison" | "ablation" | "snr" | "noise";
 export type EvaluationReport = {
-  dataset?: string;
-  clipCount?: number;
-  measuredAt?: string;
+  dataset?: string | undefined;
+  clipCount?: number | undefined;
+  measuredAt?: string | undefined;
   sections: Partial<Record<EvaluationSection, EvaluationRow[]>>;
 };
 
@@ -53,8 +53,8 @@ export type ProcessOptions = {
   candidates: TrackId[];
   asrModel: string;
   compareModels: boolean;
-  signal?: AbortSignal;
-  timeoutMs?: number;
+  signal?: AbortSignal | undefined;
+  timeoutMs?: number | undefined;
 };
 
 const STORAGE_KEY = "bharatnoise.api-base-url";
@@ -63,7 +63,7 @@ export function getApiBaseUrl(): string {
   if (typeof window === "undefined") return "";
   const stored = window.localStorage.getItem(STORAGE_KEY);
   if (stored !== null) return stored;
-  return (import.meta.env.VITE_BHARATNOISE_API_URL as string | undefined)?.replace(/\/+$/, "") ?? "";
+  return (import.meta.env["VITE_BHARATNOISE_API_URL"] as string | undefined)?.replace(/\/+$/, "") ?? "";
 }
 
 /** Validates and normalizes a proxy base address. Empty input means demo mode. */
@@ -91,7 +91,7 @@ export function saveApiBaseUrl(value: string): string {
 }
 
 async function readError(response: Response): Promise<string> {
-  const payload = (await response.json().catch(() => null)) as { detail?: unknown; message?: unknown; error?: unknown } | null;
+  const payload = (await response.json().catch(() => null)) as { detail?: unknown | undefined; message?: unknown | undefined; error?: unknown } | null | undefined;
   for (const value of [payload?.detail, payload?.message, payload?.error]) {
     if (typeof value === "string") return value;
   }
@@ -115,7 +115,7 @@ function withTimeout(signal: AbortSignal | undefined, timeoutMs: number) {
 
 function describeFetchError(error: unknown, timeoutMs: number): Error {
   if (error instanceof DOMException && error.name === "AbortError") return new Error("Processing was cancelled.");
-  if ((error instanceof DOMException && error.name === "TimeoutError") || (error as { name?: string })?.name === "TimeoutError") {
+  if ((error instanceof DOMException && error.name === "TimeoutError") || (error as { name?: string | undefined })?.name === "TimeoutError") {
     return new Error(`The audio service did not answer within ${Math.round(timeoutMs / 1000)} s.`);
   }
   if (error instanceof TypeError) {
@@ -194,7 +194,7 @@ export function normalizeProcessingResult(raw: unknown, baseUrl = ""): Processin
   for (const [key, value] of Object.entries(body.candidates ?? {})) {
     const id = asTrackId(key);
     if (!id) continue;
-    candidates[id] = { ...value, audioUrl: resolveServiceUrl(baseUrl, value.audioUrl) };
+    candidates[id] = { ...value, audioUrl: resolveServiceUrl(baseUrl, "audioUrl" in value ? value.audioUrl : undefined) };
   }
   const selectedCandidate = asTrackId(body.selected_candidate);
   if (!selectedCandidate && !body.transcription && Object.keys(candidates).length === 0) {
@@ -246,7 +246,7 @@ export async function checkApiConnection(baseUrl: string): Promise<HealthInfo> {
   try {
     const response = await fetch(`${baseUrl}/health`, { headers: { Accept: "application/json" }, signal: timeout.signal });
     if (!response.ok) throw new Error(await readError(response));
-    const body = (await response.json().catch(() => ({}))) as { status?: unknown; gnani_configured?: unknown; version?: unknown };
+    const body = (await response.json().catch(() => ({}))) as { status?: unknown | undefined; gnani_configured?: unknown | undefined; version?: unknown } | undefined;
     return {
       status: typeof body.status === "string" ? body.status : "ok",
       gnaniConfigured: typeof body.gnani_configured === "boolean" ? body.gnani_configured : undefined,
@@ -330,8 +330,8 @@ export function makeLiveSocketUrl(baseUrl: string): string {
 }
 
 export type LiveMessage =
-  | { type: "transcript"; text: string; final: boolean; candidate?: TrackId }
-  | { type: "metrics"; snrDb?: number; latencyMs?: number; candidate?: TrackId }
+  | { type: "transcript"; text: string; final: boolean; candidate?: TrackId | undefined }
+  | { type: "metrics"; snrDb?: number | undefined; latencyMs?: number | undefined; candidate?: TrackId | undefined }
   | { type: "error"; message: string };
 
 /** Parses one JSON text message from WS /live. Unknown messages return null. */

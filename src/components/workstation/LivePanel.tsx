@@ -10,8 +10,8 @@ export type LiveView = {
   framesSent: number;
   droppedFrames: number;
   levelDb: number;
-  latencyMs?: number;
-  snrDb?: number;
+  latencyMs?: number | undefined;
+  snrDb?: number | undefined;
   finals: string[];
   partial: string;
 };

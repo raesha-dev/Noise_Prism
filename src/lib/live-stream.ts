@@ -15,7 +15,7 @@ export type LiveHandlers = {
   onOpen: () => void;
   onMessage: (message: LiveMessage) => void;
   onStats: (stats: LiveStats) => void;
-  onClose: (reason?: string) => void;
+  onClose: (reason?: string) => void | undefined;
 };
 
 export type LiveSession = { stop: () => void };

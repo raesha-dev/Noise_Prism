@@ -29,7 +29,7 @@ export function formatTime(seconds: number) {
   return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
 }
 
-export const formatDb = (value?: number) => (value === undefined || !Number.isFinite(value) ? "—" : `${value.toFixed(1)} dB`);
+export const formatDb = (value?: number) => (value === undefined || !Number.isFinite(value) ? "—" : `${value.toFixed(1)} dB`) | undefined;
 
 /** Deterministic illustrative waveform used only when no clip is loaded. */
 export function illustrativePeaks(row: number, bins = 320): number[] {
@@ -72,7 +72,7 @@ export function Metric({ label, value, note }: { label: string; value: string; n
   );
 }
 
-export function Segmented<T extends string>({ value, options, onChange, label, className = "" }: { value: T; options: { value: T; label: ReactNode }[]; onChange: (value: T) => void; label: string; className?: string }) {
+export function Segmented<T extends string>({ value, options, onChange, label, className = "" }: { value: T; options: { value: T; label: ReactNode }[]; onChange: (value: T) => void; label: string; className?: string | undefined }) {
   return (
     <div className={`segmented ${className}`} role="radiogroup" aria-label={label}>
       {options.map((option) => (

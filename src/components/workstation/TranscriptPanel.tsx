@@ -6,9 +6,9 @@ import type { TrackId } from "@/lib/bharatnoise-api";
 import { characterErrorRate, diffWords, formatPercent, wordErrorRate } from "@/lib/metrics";
 import { Segmented, SourceTag, trackName } from "./shared";
 
-export type TranscriptView = { id: TrackId; text?: string; source: "service" | "sample" | "missing" };
+export type TranscriptView = { id: TrackId; text?: string | undefined; source: "service" | "sample" | "missing" };
 
-type Props = { transcripts: TranscriptView[]; selected: TrackId; baseline?: string; reference: string; onReference: (value: string) => void; modelLabel: string };
+type Props = { transcripts: TranscriptView[]; selected: TrackId; baseline?: string | undefined; reference: string; onReference: (value: string) => void; modelLabel: string };
 
 export function TranscriptPanel({ transcripts, selected, baseline, reference, onReference, modelLabel }: Props) {
   const [tab, setTab] = useState<"compare" | "single">("compare");

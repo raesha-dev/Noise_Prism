@@ -22,7 +22,7 @@ type Props = {
   onRun: () => void;
   onCancel: () => void;
   onDownload: () => void;
-  snrDb?: number;
+  snrDb?: number | undefined;
 };
 
 export function PipelinePanel(props: Props) {

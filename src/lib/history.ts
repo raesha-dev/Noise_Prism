@@ -5,11 +5,11 @@ export type HistoryEntry = {
   fileName: string;
   mode: AccuracyMode;
   source: "service" | "demo";
-  selectedCandidate?: TrackId;
-  snrDb?: number;
-  latencyMs?: number;
+  selectedCandidate?: TrackId | undefined;
+  snrDb?: number | undefined;
+  latencyMs?: number | undefined;
   createdAt: string;
-  result?: ProcessingResult;
+  result?: ProcessingResult | undefined;
 };
 
 const KEY = "bharatnoise.history.v1";

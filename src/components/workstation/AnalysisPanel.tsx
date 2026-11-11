@@ -3,13 +3,13 @@ import { Metric, Segmented, SourceTag, formatDb, formatTime } from "./shared";
 
 export type AnalysisView = {
   source: "service" | "estimate" | "sample";
-  snrDb?: number;
-  noiseFloorDb?: number;
-  speechEnergyDb?: number;
+  snrDb?: number | undefined;
+  noiseFloorDb?: number | undefined;
+  speechEnergyDb?: number | undefined;
   vadBins: boolean[];
   spectrum: number[];
-  guardStatus?: string;
-  guardScore?: number;
+  guardStatus?: string | undefined;
+  guardScore?: number | undefined;
   duration: number;
 };
 

@@ -29,8 +29,8 @@ type Clip = {
   peaks: number[] | null;
   stats: SignalStats | null;
   duration: number;
-  sampleRate?: number;
-  channels?: number;
+  sampleRate?: number | undefined;
+  channels?: number | undefined;
 };
 
 type Section = "studio" | "pipeline" | "analysis" | "transcript" | "evaluation" | "live" | "history";
