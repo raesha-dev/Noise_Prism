@@ -1,0 +1,8 @@
+# Optional voice activity detection; the adaptive energy VAD remains available without it.
+silero-vad>=5.1
+
+# Optional neural enhancement; C3 is unavailable when this package/model is absent.
+deepfilternet>=0.5
+
+# Optional .env loader; a minimal parser is used when python-dotenv is absent.
+python-dotenv>=1.0

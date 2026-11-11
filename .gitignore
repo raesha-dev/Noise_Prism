@@ -8,6 +8,13 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
+.venv/
+.env
+!.env.example
+workdir/
+cache/
+results_mock/
+data/
 dist
 dist-ssr
 .output
@@ -19,6 +26,8 @@ dist-ssr
 # Wrangler / Cloudflare
 .wrangler/
 .dev.vars
+__pycache__/
+.pytest_cache/
 
 # Editor directories and files
 .vscode/*
