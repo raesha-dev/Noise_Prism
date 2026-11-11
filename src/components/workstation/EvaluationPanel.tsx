@@ -148,7 +148,12 @@ export function EvaluationPanel({ report, onReport, reportSource, apiUrl, lastRe
       </div>
       {lastResult?.evaluation && (
         <div className="service-evaluation">
-          Last service run: WER {formatPercent(lastResult.evaluation.wer)} · CER {formatPercent(lastResult.evaluation.cer)} · {lastResult.evaluation.calls ?? "?"} Prisma call(s){lastResult.evaluation.latencyMs ? ` · ${Math.round(lastResult.evaluation.latencyMs)} ms` : ""}. {lastResult.evaluation.note ?? ""}
+          Last service run: {[
+            lastResult.evaluation.wer !== undefined ? `WER ${formatPercent(lastResult.evaluation.wer)}` : "WER not reported",
+            lastResult.evaluation.cer !== undefined ? `CER ${formatPercent(lastResult.evaluation.cer)}` : null,
+            lastResult.evaluation.calls !== undefined ? `${lastResult.evaluation.calls} Prisma call(s)` : null,
+            lastResult.evaluation.latencyMs !== undefined ? `${Math.round(lastResult.evaluation.latencyMs)} ms` : null,
+          ].filter(Boolean).join(" · ")}. {lastResult.evaluation.note ?? ""}
         </div>
       )}
     </section>

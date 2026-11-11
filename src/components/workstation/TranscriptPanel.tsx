@@ -45,7 +45,7 @@ export function TranscriptPanel({ transcripts, selected, baseline, reference, on
                 </span>
               </div>
               {item.text ? (
-                <p>{tokens ? tokens.map((token, i) => <span key={i} className={token.kind === "changed" ? "diff-changed" : ""}>{token.word} </span>) : item.text}</p>
+                <p>{tokens ? tokens.map((token, i) => <span key={i}>{token.kind === "changed" ? <mark className="diff-changed">{token.word}</mark> : token.word}{" "}</span>) : item.text}</p>
               ) : (
                 <p className="transcript-missing">Not transcribed for this run. Fast mode sends only the routed candidate to Prisma.</p>
               )}

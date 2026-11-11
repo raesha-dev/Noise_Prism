@@ -134,17 +134,35 @@ export function analyzeSignal(samples: Float32Array, sampleRate: number, vadBinC
   };
 }
 
-export async function decodeToMono(file: Blob): Promise<{ samples: Float32Array; sampleRate: number; channels: number; duration: number }> {
+/** Reads sample rate and channel count from a RIFF/WAVE header, or null for other formats. */
+export function readWavHeader(bytes: ArrayBuffer): { sampleRate: number; channels: number } | null {
+  if (bytes.byteLength < 44) return null;
+  const view = new DataView(bytes);
+  const tag = (offset: number) => String.fromCharCode(view.getUint8(offset), view.getUint8(offset + 1), view.getUint8(offset + 2), view.getUint8(offset + 3));
+  if (tag(0) !== "RIFF" || tag(8) !== "WAVE") return null;
+  let offset = 12;
+  while (offset + 8 <= bytes.byteLength) {
+    const size = view.getUint32(offset + 4, true);
+    if (tag(offset) === "fmt " && offset + 16 <= bytes.byteLength) return { channels: view.getUint16(offset + 10, true), sampleRate: view.getUint32(offset + 12, true) };
+    offset += 8 + size + (size % 2);
+  }
+  return null;
+}
+
+export async function decodeToMono(file: Blob): Promise<{ samples: Float32Array; sampleRate: number; sourceRate?: number | undefined; channels: number; duration: number }> {
   const AudioCtx = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
   const context = new AudioCtx();
   try {
-    const buffer = await context.decodeAudioData(await file.arrayBuffer());
+    const bytes = await file.arrayBuffer();
+    const header = readWavHeader(bytes);
+    const buffer = await context.decodeAudioData(bytes);
     const mono = new Float32Array(buffer.length);
     for (let c = 0; c < buffer.numberOfChannels; c += 1) {
       const data = buffer.getChannelData(c);
       for (let i = 0; i < data.length; i += 1) mono[i] = (mono[i] ?? 0) + (data[i] ?? 0) / buffer.numberOfChannels;
     }
-    return { samples: mono, sampleRate: buffer.sampleRate, channels: buffer.numberOfChannels, duration: buffer.duration };
+    // decodeAudioData resamples to the device rate; report the file's own rate when the header tells us.
+    return { samples: mono, sampleRate: buffer.sampleRate, sourceRate: header?.sampleRate, channels: header?.channels ?? buffer.numberOfChannels, duration: buffer.duration };
   } finally {
     void context.close().catch(() => undefined);
   }

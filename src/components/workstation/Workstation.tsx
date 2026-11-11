@@ -183,7 +183,7 @@ export function Workstation() {
         peaks: computePeaks(decoded.samples),
         stats: analyzeSignal(decoded.samples, decoded.sampleRate),
         duration: decoded.duration,
-        sampleRate: decoded.sampleRate,
+        sampleRate: decoded.sourceRate,
         channels: decoded.channels,
       } : current);
       toast.success(`${file.name} is ready.`);

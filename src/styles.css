@@ -292,6 +292,8 @@
 .service-status.pending > span { background: var(--wn-faint); }
 
 .workspace-content { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.studio-layout > *, .insight-layout > *, .bottom-layout > *, .transcript-card, .analysis-visual { min-width: 0; }
+.file-chip { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .status-strip {
   display: flex; align-items: center; gap: 9px;
@@ -830,7 +832,8 @@
   .status-strip { flex-wrap: wrap; }
   .timeline-scale { margin-left: 0; }
   .wave-row { grid-template-columns: 26px 1fr; }
-  .wave-row .waveform { grid-column: 1 / -1; }
+  .wave-row .waveform-cell { grid-column: 1 / -1; }
+  .track-status { top: -14px; }
   .top-title { display: none; }
   .evaluation-content, .transcript-cards { grid-template-columns: 1fr; }
 }
