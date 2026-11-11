@@ -28,3 +28,10 @@ use the editor.
   own key and store it in Secrets.
 - **Secrets.** Lovable manages them. Do not put secret values in the repo.
 <!-- LOVABLE:END -->
+
+## Project rules
+
+- The browser talks only to a user-run FastAPI/Flask proxy via `src/lib/bharatnoise-api.ts`; the wire contract lives in `docs/proxy-contract.md` and both must change together. Why: Gnani credentials must never reach the browser.
+- Live-monitor framing constants live in `src/lib/pcm-framer.ts` and are covered by tests. Why: the 8 kHz / 1,024-byte / 64 ms contract is fixed by the upstream ASR.
+- Every metric shown in the UI carries a source tag (service, browser estimate, illustrative, imported). Why: sample numbers must never read as verified results.
+- Workstation UI is split into `src/components/workstation/*`; `Workstation.tsx` owns state, panels are presentational. Why: keeps the single route manageable.
