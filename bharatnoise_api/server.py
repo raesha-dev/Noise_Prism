@@ -43,11 +43,13 @@ from websockets.asyncio.client import connect as ws_connect
 try:
     from . import compare as cmp
     from . import pipeline as pl
+    from .env import load_environment
     from .gnani_client import FatalAPIError, GnaniClient, Transcript, endpoint_mode
     from .metrics import normalize, score_utterance
 except ImportError:
     import compare as cmp
     import pipeline as pl
+    from env import load_environment
     from gnani_client import FatalAPIError, GnaniClient, Transcript, endpoint_mode
     from metrics import normalize, score_utterance
 
@@ -93,6 +95,7 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> "Settings":
+        load_environment()
         e = os.environ.get
         s = cls()
         data_dir = Path(e("BN_DATA_DIR", str(ROOT))).expanduser().resolve()
@@ -107,6 +110,7 @@ class Settings:
         s.ws_url = e("GNANI_WS_URL", s.ws_url)
         s.live_stop_grace_s = float(e("BN_LIVE_STOP_GRACE_S", s.live_stop_grace_s))
         s.live_max_s = float(e("BN_LIVE_MAX_SECONDS", s.live_max_s))
+        s.live_frame_ms = int(e("BN_LIVE_FRAME_MS", s.live_frame_ms))
         return s
 
 
@@ -256,6 +260,11 @@ def _normalise_model(value: str) -> str:
     return model
 
 
+def _redact_secret(message: str) -> str:
+    key = os.environ.get("GNANI_API_KEY", "")
+    return message.replace(key, "[REDACTED]") if key else message
+
+
 def validate_language(language: str, model: str) -> None:
     if language == "indic-auto":
         if model != "v3.0":
@@ -301,7 +310,7 @@ def create_app(settings: Optional[Settings] = None,
             try:
                 holder["client"] = client_factory() if client_factory else GnaniClient(cache_dir=cfg.workdir / "cache")
             except FatalAPIError as exc:
-                raise ApiError(503, "GNANI_KEY_MISSING", str(exc))
+                raise ApiError(503, "GNANI_KEY_MISSING", _redact_secret(str(exc)))
         return holder["client"]
 
     def reserve_calls(n: int) -> None:
@@ -456,14 +465,14 @@ def create_app(settings: Optional[Settings] = None,
                 key_missing = "not configured" in str(exc).lower()
                 job.status, job.error = "error", {
                     "code": "GNANI_KEY_MISSING" if key_missing else "GNANI_FATAL",
-                    "message": "GNANI_API_KEY is not configured." if key_missing else str(exc),
+                    "message": "GNANI_API_KEY is not configured." if key_missing else _redact_secret(str(exc)),
                 }
             except Exception as exc:  # keep the worker alive whatever happens
                 if type(exc).__name__ == "FatalAPIError":
                     missing_key = "not configured" in str(exc).lower()
                     job.status, job.error = "error", {
                         "code": "GNANI_KEY_MISSING" if missing_key else "GNANI_FATAL",
-                        "message": "GNANI_API_KEY is not configured." if missing_key else str(exc),
+                        "message": "GNANI_API_KEY is not configured." if missing_key else _redact_secret(str(exc)),
                     }
                 else:
                     job.status, job.error = "error", {

@@ -438,6 +438,29 @@ def test_missing_key_gives_clear_error(tmp_path, monkeypatch):
         assert c.get("/api/health").json()["gnani_key_configured"] is False
 
 
+def test_gnani_key_is_redacted_from_responses_logs_and_errors(tmp_path, monkeypatch, caplog):
+    secret = "distinctive-bharatnoise-test-key"
+    monkeypatch.setenv("GNANI_API_KEY", secret)
+    app, _ = make_app(tmp_path, FakeClient(raises=FatalAPIError(f"upstream failure {secret}")))
+    with TestClient(app) as c:
+        responses = [c.get("/api/health"), c.get("/api/config")]
+        cid = upload(c).json()["clip_id"]
+        responses.append(c.post("/api/jobs", json={
+            "clip_id": cid, "mode": "raw", "language": "hi-IN", "model": "v2.5",
+        }))
+        job_id = responses[-1].json()["job_id"]
+        for _ in range(100):
+            job_response = c.get(f"/api/jobs/{job_id}")
+            if job_response.json()["status"] == "error":
+                break
+            time.sleep(0.05)
+        responses.append(job_response)
+
+    exposed = "\n".join(response.text for response in responses) + caplog.text
+    assert secret not in exposed
+    assert responses[-1].json()["error"]["message"] == "upstream failure [REDACTED]"
+
+
 # --------------------------------------------------------------------- scoring
 def test_score_route(tmp_path):
     app, _ = make_app(tmp_path)
