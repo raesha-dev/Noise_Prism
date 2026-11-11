@@ -1,5 +1,5 @@
 /**
- * Demo-only live monitor transport. Captures the microphone with browser DSP disabled,
+ * Live monitor transport. Captures the microphone with browser DSP disabled,
  * resamples to 8 kHz mono PCM16 and sends exactly one 1,024-byte frame every 64 ms over WS /live.
  * Browsers cannot set custom WebSocket headers, so the proxy must add `x-sample-rate: 8000`
  * and the telephony VAD preset on its upstream Gnani connection (see docs/proxy-contract.md).
@@ -29,6 +29,7 @@ export type LiveHandlers = {
 };
 
 export type LiveSession = { stop: () => void };
+const STOP_TIMEOUT_MS = 10_000;
 
 export async function startLiveStream(
   baseUrl: string,
@@ -57,7 +58,10 @@ export async function startLiveStream(
   let framesSent = 0;
   let levelDb = -120;
   let stopped = false;
+  let stopRequested = false;
+  let captureReleased = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let stopTimeout: ReturnType<typeof setTimeout> | null = null;
   let tickStart = 0;
   let tick = 0;
 
@@ -92,17 +96,46 @@ export async function startLiveStream(
     queue.push(resampler.process(input));
   };
 
-  const cleanup = (reason?: string) => {
-    if (stopped) return;
-    stopped = true;
+  const releaseCapture = () => {
+    if (captureReleased) return;
+    captureReleased = true;
     if (timer) clearTimeout(timer);
+    timer = null;
+    processor.onaudioprocess = null;
     processor.disconnect();
     source.disconnect();
     stream.getTracks().forEach((track) => track.stop());
     void context.close().catch(() => undefined);
+  };
+
+  const cleanup = (reason?: string) => {
+    if (stopped) return;
+    stopped = true;
+    if (stopTimeout) clearTimeout(stopTimeout);
+    releaseCapture();
     if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)
       socket.close(1000, "client stop");
     handlers.onClose(reason);
+  };
+
+  const requestStop = () => {
+    if (stopped || stopRequested) return;
+    stopRequested = true;
+    if (socket.readyState !== WebSocket.OPEN) {
+      cleanup();
+      return;
+    }
+    releaseCapture();
+    try {
+      socket.send(JSON.stringify({ type: "stop" }));
+    } catch {
+      cleanup("Could not send the live stop command.");
+      return;
+    }
+    stopTimeout = setTimeout(
+      () => cleanup("The live proxy did not close after stop."),
+      STOP_TIMEOUT_MS,
+    );
   };
 
   socket.addEventListener("open", () => {
@@ -116,7 +149,6 @@ export async function startLiveStream(
         frame_ms: LIVE_FRAME_INTERVAL_MS,
         vad_preset: "telephony",
         candidates: LIVE_CANDIDATES,
-        demo: true,
       }),
     );
     source.connect(processor);
@@ -142,5 +174,5 @@ export async function startLiveStream(
     cleanup(event.code === 1000 ? undefined : `Live connection closed (${event.code}).`),
   );
 
-  return { stop: () => cleanup() };
+  return { stop: requestStop };
 }
