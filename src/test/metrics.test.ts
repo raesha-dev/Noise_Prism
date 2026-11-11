@@ -39,3 +39,11 @@ describe("demo SNR router", () => {
     expect(routeBySnr(1, false)).toBe("C2");
   });
 });
+
+import { encodeWav, readWavHeader } from "@/lib/audio-utils";
+describe("WAV header", () => {
+  it("reports the file's own 8 kHz mono format", async () => {
+    const bytes = await encodeWav(new Float32Array(800), 8000).arrayBuffer();
+    expect(readWavHeader(bytes)).toEqual({ sampleRate: 8000, channels: 1 });
+  });
+});

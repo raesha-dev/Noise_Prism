@@ -109,7 +109,7 @@ export function AudioStudio(props: Props) {
           {props.clip?.name ?? "No clip loaded · drop audio here"}
           <span className="sample-tag">{props.clip ? props.clip.source.toUpperCase() : "PREVIEW"}</span>
         </span>
-        <span className="meta-chip"><Activity />{props.clip?.sampleRate ? `${(props.clip.sampleRate / 1000).toFixed(props.clip.sampleRate % 1000 ? 1 : 0)} kHz source → 8 kHz` : "8 kHz target"}</span>
+        <span className="meta-chip"><Activity />{!props.clip?.sampleRate ? "8 kHz target" : props.clip.sampleRate === 8000 ? "8 kHz native" : `${(props.clip.sampleRate / 1000).toFixed(props.clip.sampleRate % 1000 ? 1 : 0)} kHz → 8 kHz`}</span>
         <span className="meta-chip">{props.clip?.channels && props.clip.channels > 1 ? `${props.clip.channels} ch → mono` : "Mono"}</span>
         <span className="meta-chip"><Clock3 />{props.clip ? `${duration.toFixed(1)} s` : "—"}</span>
         {props.analyzing && <span className="meta-chip"><LoaderCircle className="spin" />Analysing</span>}
