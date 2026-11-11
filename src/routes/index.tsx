@@ -372,7 +372,7 @@ function BharatNoise() {
         setLiveState("ready");
       });
       socket.addEventListener("close", () => {
-        if (liveSocketRef.current === socket && liveState === "connecting") setLiveState("ready");
+        if (liveSocketRef.current === socket) setLiveState("ready");
       });
     } catch (error) {
       liveStream?.getTracks().forEach((track) => track.stop());
@@ -511,7 +511,7 @@ function BharatNoise() {
             <section className="panel transcript-panel" id="section-transcript" aria-labelledby="transcript-heading">
               <div className="panel-heading"><div className="panel-title"><FileAudio /><div><h2 id="transcript-heading">Transcript Studio</h2><span>Gnani Prisma · verbatim</span></div></div><div className="segmented transcript-tabs"><button className={transcriptTab === "compare" ? "active" : ""} onClick={() => setTranscriptTab("compare")}>Compare</button><button className={transcriptTab === "single" ? "active" : ""} onClick={() => setTranscriptTab("single")}>Selected</button></div></div>
               <div className={`transcript-cards ${transcriptTab === "single" ? "single" : ""}`}>
-                {(transcriptTab === "single" ? [selected] : ["C0", selected].filter((value, index, array) => array.indexOf(value) === index)).map((id) => <article className="transcript-card" key={id}><div className="transcript-card-head"><strong>{id === "C0" ? "Original (C0)" : `${id} · ${trackDefs.find((track) => track.id === id)?.name}`}</strong><span>{result ? "Gnani Prisma" : "Sample text"}</span></div><p>{result?.candidates?.[id] ?? (id === "C0" ? result?.candidates?.C0 : undefined) ?? sampleTexts[id as TrackId]}</p>{!result && <small>Illustrative transcript · not generated from your clip</small>}</article>)}
+                {(transcriptTab === "single" ? [selected] : ["C0", selected].filter((value, index, array) => array.indexOf(value) === index)).map((id) => <article className="transcript-card" key={id}><div className="transcript-card-head"><strong>{id === "C0" ? "Original (C0)" : `${id} · ${trackDefs.find((track) => track.id === id)?.name}`}</strong><span>{result ? "Gnani Prisma" : "Sample text"}</span></div><p>{result?.candidates?.[id] ?? (id === "C0" ? result?.candidates?.["C0"] : undefined) ?? sampleTexts[id as TrackId]}</p>{!result && <small>Illustrative transcript · not generated from your clip</small>}</article>)}
               </div>
             </section>
           </section>
