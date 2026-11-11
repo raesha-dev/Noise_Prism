@@ -848,3 +848,6 @@
 @media (prefers-reduced-motion: reduce) {
   .demo-dot, .spin, .run-indicator.running > span, .record-button.is-recording .record-dot { animation: none; }
 }
+
+[id^="section-"] { scroll-margin-top: 84px; }
+@media (max-width: 900px) { [id^="section-"] { scroll-margin-top: 124px; } }
