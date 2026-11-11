@@ -8,12 +8,12 @@ import { Segmented, SourceTag, trackName } from "./shared";
 
 export type TranscriptView = { id: TrackId; text?: string; source: "service" | "sample" | "missing" };
 
-type Props = { transcripts: TranscriptView[]; baseline?: string; reference: string; onReference: (value: string) => void; modelLabel: string };
+type Props = { transcripts: TranscriptView[]; selected: TrackId; baseline?: string; reference: string; onReference: (value: string) => void; modelLabel: string };
 
-export function TranscriptPanel({ transcripts, baseline, reference, onReference, modelLabel }: Props) {
+export function TranscriptPanel({ transcripts, selected, baseline, reference, onReference, modelLabel }: Props) {
   const [tab, setTab] = useState<"compare" | "single">("compare");
   const [showReference, setShowReference] = useState(false);
-  const shown = tab === "single" ? transcripts.slice(-1) : transcripts;
+  const shown = tab === "single" ? transcripts.filter((item) => item.id === selected) : transcripts;
 
   async function copy(text: string) {
     try {
