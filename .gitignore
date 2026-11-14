@@ -8,13 +8,19 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules/
-.venv/
+.venv*/
 .env
 !.env.example
 workdir/
 cache/
 results_mock/
 data/
+!bharatnoise_api/data/
+bharatnoise_api/data/*
+!bharatnoise_api/data/PROVENANCE.md
+!bharatnoise_api/data/team/
+bharatnoise_api/data/team/*
+!bharatnoise_api/data/team/*.csv
 dist
 dist-ssr
 .output/

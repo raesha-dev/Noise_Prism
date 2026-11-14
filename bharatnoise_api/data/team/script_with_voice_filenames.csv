@@ -1,0 +1,55 @@
+﻿id,language,text,filename,speaker_id,split,voice_group_suggestion,voice_group_status
+hi_01,hi-IN,मुझे आज शाम की ट्रेन का समय जानना है।,मुझे आज शाम की ट्रेन.wav,,,hi_candidate_01,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+hi_02,hi-IN,कृपया अपनी बात धीरे और साफ़ बोलिए।,कृपया अपनी बात धीरे .wav,,,hi_candidate_02,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+hi_03,hi-IN,आपका बिल बारह हज़ार पाँच सौ रुपये का है।,आपका बिल बारह हज़ार .wav,,,hi_candidate_01,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+hi_04,hi-IN,भुगतान पाँच तारीख तक करना होगा।,भुगतान पाँच तारीख तक.wav,,,hi_candidate_02,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+hi_05,hi-IN,आपकी शिकायत दर्ज कर ली गई है।,आपकी शिकायत दर्ज कर .wav,,,hi_candidate_03,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+hi_06,hi-IN,कृपया लाइन पर बने रहिए।,कृपया लाइन पर बने रह.wav,,,hi_candidate_03,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+hi_07,hi-IN,आवाज़ ठीक से नहीं आ रही है।,आवाज़ ठीक से नहीं आ .wav,,,hi_candidate_03,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+hi_08,hi-IN,क्या आप यह दोबारा बता सकते हैं?,क्या आप यह दोबारा बत.wav,,,hi_candidate_01,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+hi_09,hi-IN,डिलीवरी कल सुबह दस बजे तक हो जाएगी।,डिलीवरी कल सुबह दस ब.wav,,,hi_candidate_01,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+hi_10,hi-IN,यह ऑफ़र इकतीस दिसंबर तक वैध है।,यह ऑफ़र इकतीस दिसंबर.wav,,,hi_candidate_01,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+hi_11,hi-IN,ऑर्डर की स्थिति जानने के लिए एक दबाइए।,ऑर्डर की स्थिति जानन.wav,,,hi_candidate_04,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+hi_12,hi-IN,मेरा पेमेंट अभी तक रिफ्लेक्ट नहीं हुआ।,मेरा पेमेंट अभी तक र.wav,,,hi_candidate_04,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+hi_13,hi-IN,आज मौसम बहुत गर्म है।,आज मौसम बहुत गर्म है.wav,,,hi_candidate_05,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+hi_14,hi-IN,बाज़ार में सब्ज़ियों के दाम बढ़ गए हैं।,बाज़ार में सब्ज़ियों.wav,,,hi_candidate_05,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+hi_15,hi-IN,बस स्टॉप यहाँ से दो किलोमीटर दूर है।,बस स्टॉप यहाँ से दो .wav,,,hi_candidate_04,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+hi_16,hi-IN,आपका रिचार्ज सफल रहा।,आपका रिचार्ज सफल रहा.wav,,,hi_candidate_01,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+hi_17,hi-IN,कृपया अपना ईएमआई समय पर जमा करें।,कृपया अपना ईएमआई समय.wav,,,hi_candidate_01,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+hi_18,hi-IN,"धन्यवाद, आपका दिन शुभ हो।",धन्यवाद आपका दिन शुभ.wav,,,hi_candidate_01,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+kn_01,kn-IN,ನನಗೆ ಇಂದು ಸಂಜೆಯ ರೈಲಿನ ಸಮಯ ತಿಳಿಯಬೇಕು.,ನನಗೆ ಇಂದು ಸಂಜೆಯ ರೈಲಿ.wav,,,kn_candidate_01,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+kn_02,kn-IN,ದಯವಿಟ್ಟು ನಿಧಾನವಾಗಿ ಮತ್ತು ಸ್ಪಷ್ಟವಾಗಿ ಮಾತನಾಡಿ.,ದಯವಿಟ್ಟು ನಿಧಾನವಾಗಿ ಮ.wav,,,kn_candidate_02,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+kn_03,kn-IN,ನಿಮ್ಮ ಬಿಲ್ ಹನ್ನೆರಡು ಸಾವಿರದ ಐನೂರು ರೂಪಾಯಿ.,ನಿಮ್ಮ ಬಿಲ್ ಹನ್ನೆರಡು .wav,,,kn_candidate_03,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+kn_04,kn-IN,ಪಾವತಿಯನ್ನು ಐದನೇ ತಾರೀಖಿನೊಳಗೆ ಮಾಡಬೇಕು.,ಪಾವತಿಯನ್ನು ಐದನೇ ತಾರೀ.wav,,,kn_candidate_03,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+kn_05,kn-IN,ನಿಮ್ಮ ದೂರು ದಾಖಲಾಗಿದೆ.,ನಿಮ್ಮ ದೂರು ದಾಖಲಾಗಿದೆ.wav,,,kn_candidate_03,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+kn_06,kn-IN,ದಯವಿಟ್ಟು ಕರೆಯಲ್ಲಿ ಇರಿ.,ದಯವಿಟ್ಟು ಕರೆಯಲ್ಲಿ ಇರ.wav,,,kn_candidate_03,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+kn_07,kn-IN,ಧ್ವನಿ ಸರಿಯಾಗಿ ಕೇಳಿಸುತ್ತಿಲ್ಲ.,ಧ್ವನಿ ಸರಿಯಾಗಿ ಕೇಳಿಸು.wav,,,kn_candidate_03,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+kn_08,kn-IN,ದಯವಿಟ್ಟು ಇದನ್ನು ಮತ್ತೊಮ್ಮೆ ಹೇಳಬಹುದೇ?,ದಯವಿಟ್ಟು ಇದನ್ನು ಮತ್ತ.wav,,,kn_candidate_03,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+kn_09,kn-IN,ಡೆಲಿವರಿ ನಾಳೆ ಬೆಳಿಗ್ಗೆ ಹತ್ತು ಗಂಟೆಯೊಳಗೆ ಆಗುತ್ತದೆ.,ಡೆಲಿವರಿ ನಾಳೆ ಬೆಳಿಗ್ಗ.wav,,,kn_candidate_01,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+kn_10,kn-IN,ಈ ಆಫರ್ ಡಿಸೆಂಬರ್ ಮೂವತ್ತೊಂದನೇ ತಾರೀಖಿನವರೆಗೆ ಮಾನ್ಯವಾಗಿದೆ.,ಈ ಆಫರ್ ಡಿಸೆಂಬರ್ ಮೂವತ.wav,,,kn_candidate_01,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+kn_11,kn-IN,ಆರ್ಡರ್ ಸ್ಥಿತಿ ತಿಳಿಯಲು ಒಂದನ್ನು ಒತ್ತಿರಿ.,ಆರ್ಡರ್ ಸ್ಥಿತಿ ತಿಳಿಯಲ.wav,,,kn_candidate_02,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+kn_12,kn-IN,ನನ್ನ ಪೇಮೆಂಟ್ ಇನ್ನೂ ರಿಫ್ಲೆಕ್ಟ್ ಆಗಿಲ್ಲ.,ನನ್ನ ಪೇಮೆಂಟ್ ಇನ್ನೂ ರ.wav,,,kn_candidate_01,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+kn_13,kn-IN,ಇಂದು ಹವಾಮಾನ ತುಂಬಾ ಬಿಸಿಯಾಗಿದೆ.,ಇಂದು ಹವಾಮಾನ ತುಂಬಾ ಬಿ.wav,,,kn_candidate_01,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+kn_14,kn-IN,ಮಾರುಕಟ್ಟೆಯಲ್ಲಿ ತರಕಾರಿ ಬೆಲೆ ಹೆಚ್ಚಾಗಿದೆ.,ಮಾರುಕಟ್ಟೆಯಲ್ಲಿ ತರಕಾರ.wav,,,kn_candidate_03,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+kn_15,kn-IN,ಬಸ್ ನಿಲ್ದಾಣ ಇಲ್ಲಿಂದ ಎರಡು ಕಿಲೋಮೀಟರ್ ದೂರದಲ್ಲಿದೆ.,ಬಸ್ ನಿಲ್ದಾಣ ಇಲ್ಲಿಂದ .wav,,,kn_candidate_03,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+kn_16,kn-IN,ನಿಮ್ಮ ರೀಚಾರ್ಜ್ ಯಶಸ್ವಿಯಾಗಿದೆ.,ನಿಮ್ಮ ರೀಚಾರ್ಜ್ ಯಶಸ್ವ.wav,,,kn_candidate_02,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+kn_17,kn-IN,ದಯವಿಟ್ಟು ನಿಮ್ಮ ಇಎಂಐ ಸಮಯಕ್ಕೆ ಸರಿಯಾಗಿ ಪಾವತಿಸಿ.,ದಯವಿಟ್ಟು ನಿಮ್ಮ ಇಎಂಐ .wav,,,kn_candidate_03,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+kn_18,kn-IN,"ಧನ್ಯವಾದಗಳು, ನಿಮ್ಮ ದಿನ ಶುಭವಾಗಿರಲಿ.",ಧನ್ಯವಾದಗಳು ನಿಮ್ಮ ದಿನ.wav,,,kn_candidate_03,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+en_01,en-IN,Please tell me the timing of the evening train.,Please tell me the t.wav,,,en_candidate_01,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+en_02,en-IN,Kindly speak slowly and clearly.,Kindly speak slowly .wav,,,en_candidate_02,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+en_03,en-IN,Your bill is twelve thousand five hundred rupees.,Your bill is twelve .wav,,,en_candidate_01,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+en_04,en-IN,The payment must be made by the fifth.,The payment must be .wav,,,en_candidate_03,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+en_05,en-IN,Your complaint has been registered.,Your complaint has b.wav,,,en_candidate_04,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+en_06,en-IN,Please stay on the line.,Please stay on the l.wav,,,en_candidate_04,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+en_07,en-IN,"Your voice is breaking, can you repeat that?",Your voice is breaki.wav,,,en_candidate_02,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+en_08,en-IN,The delivery will reach you by tomorrow morning.,The delivery will re.wav,,,en_candidate_03,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+en_09,en-IN,This offer is valid till the thirty first of December.,This offer is valid .wav,,,en_candidate_01,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+en_10,en-IN,Press one to know your order status.,Press one to know yo.wav,,,en_candidate_01,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+en_11,en-IN,My payment has not reflected yet.,My payment has not r.wav,,,en_candidate_02,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+en_12,en-IN,It is very hot today.,It is very hot today.wav,,,en_candidate_02,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+en_13,en-IN,Vegetable prices have gone up in the market.,Vegetable prices hav.wav,,,en_candidate_05,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+en_14,en-IN,The bus stop is two kilometres from here.,The bus stop is two .wav,,,en_candidate_05,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+en_15,en-IN,Your recharge was successful.,Your recharge was su.wav,,,en_candidate_05,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+en_16,en-IN,Please pay your EMI on time.,Please pay your EMI .wav,,,en_candidate_02,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+en_17,en-IN,Could you please do the needful by Monday?,Could you please do .wav,,,en_candidate_02,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
+en_18,en-IN,"Thank you, have a good day.",Thank you have a goo.wav,,,en_candidate_01,PROVISIONAL: acoustic candidate only; listen and confirm before using as speaker_id
