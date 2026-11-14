@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import csv
 import random
+import statistics
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,8 @@ try:
     from .metrics import normalize, score_utterance, win_tie_loss
 except ImportError:
     from metrics import normalize, score_utterance, win_tie_loss
+
+MIN_REPORTABLE_SOURCE_CLIPS = 20
 
 
 def load(path: Path) -> list[dict[str, str]]:
@@ -61,11 +64,23 @@ def _float_delta(left: float | None, right: float | None) -> float | None:
 def _bootstrap_corpus_delta(
     pairs: list[tuple[dict[str, str], dict[str, str]]], n_boot: int, seed: int, char: bool = False
 ) -> tuple[float | None, float | None]:
-    """Bootstrap paired utterances and recompute corpus WER or CER per resample."""
+    """Bootstrap speakers when confirmed, else source clips, then utterances."""
     rng = random.Random(seed)
+    clusters: dict[str, list[tuple[dict[str, str], dict[str, str]]]] = {}
+    for index, pair in enumerate(pairs):
+        source_clip_id = pair[0].get("source_clip_id", "").strip()
+        speaker_id = pair[0].get("speaker_id", "").strip()
+        cluster_id = (
+            f"speaker:{speaker_id}" if speaker_id
+            else f"source_clip:{source_clip_id}" if source_clip_id
+            else f"utterance:{index}"
+        )
+        clusters.setdefault(cluster_id, []).append(pair)
+    cluster_ids = list(clusters)
     estimates: list[float] = []
     for _ in range(n_boot):
-        sample = [pairs[rng.randrange(len(pairs))] for _ in pairs]
+        sampled_clusters = [cluster_ids[rng.randrange(len(cluster_ids))] for _ in cluster_ids]
+        sample = [pair for cluster_id in sampled_clusters for pair in clusters[cluster_id]]
         a_errors = a_words = b_errors = b_words = 0
         for left, right in sample:
             a = _row_errors(left)
@@ -90,7 +105,16 @@ def summarise(
 ) -> dict[str, Any]:
     """Summarize paired WER/CER deltas (B minus A), bootstrap intervals and wins."""
     if not pairs:
-        return {"clips": 0, "wer": None, "cer": None, "B_better": 0, "tie": 0, "A_better": 0}
+        return {
+            "clips": 0, "n_source_clips": 0, "underpowered": True,
+            "wer": None, "cer": None, "B_better": None, "tie": None, "A_better": None,
+        }
+    source_clip_ids = {
+        right.get("source_clip_id", "").strip() or right.get("id", "").strip()
+        for _, right in pairs
+        if right.get("source_clip_id", "").strip() or right.get("id", "").strip()
+    }
+    underpowered = len(source_clip_ids) < MIN_REPORTABLE_SOURCE_CLIPS
     a_rows = [left for left, _ in pairs]
     b_rows = [right for _, right in pairs]
     wer_a, wer_b = _rate(a_rows), _rate(b_rows)
@@ -103,15 +127,34 @@ def summarise(
             wer_diffs.append(e_b / n_b - e_a / n_a)
     lo, hi = _bootstrap_corpus_delta(pairs, n_boot, seed)
     win, tie, loss = win_tie_loss(wer_diffs)
+    if underpowered:
+        lo = hi = None
+        cer_lo = cer_hi = None
+        win = tie = loss = None
+    else:
+        cer_lo, cer_hi = _bootstrap_corpus_delta(pairs, n_boot, seed, char=True)
+    per_clip_changes = []
+    for left, right in pairs:
+        left_errors, left_words, _, _ = _row_errors(left)
+        right_errors, right_words, _, _ = _row_errors(right)
+        if left_words and right_words:
+            per_clip_changes.append(right_errors / right_words - left_errors / left_words)
     return {
         "clips": len(pairs),
-        "wer": {"A": wer_a, "B": wer_b, "delta": _float_delta(wer_a, wer_b), "ci95": [lo, hi]},
+        "n_source_clips": len(source_clip_ids),
+        "underpowered": underpowered,
+        "wer": {
+            "A": wer_a, "B": wer_b,
+            "delta": None if underpowered else _float_delta(wer_a, wer_b),
+            "ci95": [lo, hi],
+        },
         "cer": {
             "A": cer_a,
             "B": cer_b,
-            "delta": _float_delta(cer_a, cer_b),
-            "ci95": list(_bootstrap_corpus_delta(pairs, n_boot, seed, char=True)),
+            "delta": None if underpowered else _float_delta(cer_a, cer_b),
+            "ci95": [cer_lo, cer_hi],
         },
+        "median_delta_wer": None if underpowered or not per_clip_changes else statistics.median(per_clip_changes),
         "B_better": loss,
         "tie": tie,
         "A_better": win,

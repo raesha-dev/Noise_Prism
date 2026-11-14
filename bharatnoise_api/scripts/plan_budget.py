@@ -9,7 +9,7 @@ from pathlib import Path
 import soundfile as sf
 
 ROOT = Path(__file__).resolve().parents[1]
-VALID_CANDIDATES = ("C0", "C1", "C2", "C3")
+VALID_CANDIDATES = ("C0", "C1", "C2", "C2B", "C2C", "C3")
 VALID_MODELS = ("v2.5", "v3.0")
 
 

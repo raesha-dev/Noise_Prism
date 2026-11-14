@@ -5,8 +5,8 @@ Everything here is deliberately small and dependency-light so the API runs on a 
 Placeholders you are expected to replace as the project matures:
   * `energy_vad` is a simple adaptive energy detector, not a trained VAD. Swap in
     Silero VAD (or WebRTC VAD) behind the same `analyze` output once you have it.
-  * Only C0 (original) and C1 (hygiene) exist. Register C2 (blended suppression) and
-    C3 (neural) with `register(...)` when they are built; the API picks them up.
+  * C2B/C2C are simplified experimental spectral candidates; their configuration
+    is explicitly unfitted and must not be presented as paper-faithful methods.
   * The router thresholds in config/router.json are UNFITTED until you fit them on the
     development set and flip "fitted" to true. The API reports that flag in every
     decision so an unfitted router can never pass as a validated one.
@@ -26,11 +26,11 @@ import soundfile as sf
 from scipy import signal
 
 try:
-    from .audio import hygiene as hygiene_module
+    from .audio import hygiene as hygiene_module, imcra_omlsa as imcra_module
     from .audio import neural, suppress as suppress_module, vad
     from .metrics import align_counts, normalize
 except ImportError:
-    from audio import hygiene as hygiene_module
+    from audio import hygiene as hygiene_module, imcra_omlsa as imcra_module
     from audio import neural, suppress as suppress_module, vad
     from metrics import align_counts, normalize
 
@@ -40,6 +40,8 @@ MIN_SECONDS = 0.3
 FRAME = 160
 ROOT = Path(__file__).resolve().parent
 SUPPRESS_CONFIG = suppress_module.load_config()
+IMCRA_CONFIG_PATH = ROOT / "config" / "imcra_omlsa.json"
+IMCRA_CONFIG = json.loads(IMCRA_CONFIG_PATH.read_text(encoding="utf-8"))
 
 
 class AudioError(ValueError):
@@ -107,7 +109,7 @@ def analyze(x: np.ndarray) -> dict:
     return {
         "duration_s": round(len(x) / SR, 3),
         "noise_floor_db": round(float(10 * np.log10(noise_p)), 1),
-        "snr_db_est": None if snr is None else round(snr, 1),
+        "stationary_snr_db_est": None if snr is None else round(snr, 1),
         "speech_energy_db": None if speech_p is None else round(float(10 * np.log10(speech_p)), 1),
         "speech_ratio": round(float(mask.mean()), 3),
         "clipped_ratio": round(float(np.mean(np.abs(x) >= 0.999)), 4),
@@ -122,6 +124,12 @@ def analyze(x: np.ndarray) -> dict:
 def speech_mask_samples(x: np.ndarray) -> np.ndarray:
     mask, _ = energy_vad(x)
     return np.repeat(mask, FRAME)
+
+
+def _adaptive_enhance(x: np.ndarray, config: dict) -> tuple[np.ndarray, dict]:
+    """Run the experimental spectral filter with the same speech mask used by analysis."""
+    mask, _, _ = vad.speech_mask(x, SR, FRAME)
+    return imcra_module.enhance(x, config, mask)
 
 
 # ----------------------------------------------------------------- candidates
@@ -146,7 +154,20 @@ CANDIDATES: dict[str, Candidate] = {
     "C2": Candidate(
         "C2",
         "Conservative Wiener suppression with observation blend",
-        lambda x: suppress_module.suppress(x, speech_mask_samples(x)[:len(x) // FRAME], analyze(x)["snr_db_est"], SUPPRESS_CONFIG)[0],
+        lambda x: suppress_module.suppress(x, speech_mask_samples(x)[:len(x) // FRAME], analyze(x)["stationary_snr_db_est"], SUPPRESS_CONFIG)[0],
+    ),
+    "C2B": Candidate(
+        "C2B",
+        "Adaptive spectral + VAD speech leveling (experimental)",
+        lambda x: _adaptive_enhance(x, IMCRA_CONFIG)[0],
+    ),
+    "C2C": Candidate(
+        "C2C",
+        "Voice-leveled spectral experiment + observation addition",
+        lambda x: imcra_module.add_observation(
+            _adaptive_enhance(x, IMCRA_CONFIG)[0], x, float(IMCRA_CONFIG["oa_lambda"]),
+            float(IMCRA_CONFIG["peak_limit"]), IMCRA_CONFIG["oa_sweep"],
+        )[0],
     ),
 }
 PLANNED: dict[str, str] = {"C3": "DeepFilterNet neural enhancement"}
@@ -155,15 +176,17 @@ _CANDIDATE_META: dict[str, Callable[[np.ndarray], dict]] = {
     "C0": lambda x: {"gain_applied_db": 0.0},
     "C1": lambda x: hygiene_module.hygiene(x)[1],
     "C2": lambda x: suppress_module.suppress(
-        x, speech_mask_samples(x)[:len(x) // FRAME], analyze(x)["snr_db_est"], SUPPRESS_CONFIG
+        x, speech_mask_samples(x)[:len(x) // FRAME], analyze(x)["stationary_snr_db_est"], SUPPRESS_CONFIG
     )[1],
+    "C2B": lambda x: _adaptive_enhance(x, IMCRA_CONFIG)[1],
 }
 _CANDIDATE_APPLY: dict[str, Callable[[np.ndarray], tuple[np.ndarray, dict]]] = {
     "C0": lambda x: (x.copy(), {"gain_applied_db": 0.0}),
     "C1": hygiene_module.hygiene,
     "C2": lambda x: suppress_module.suppress(
-        x, speech_mask_samples(x)[:len(x) // FRAME], analyze(x)["snr_db_est"], SUPPRESS_CONFIG
+        x, speech_mask_samples(x)[:len(x) // FRAME], analyze(x)["stationary_snr_db_est"], SUPPRESS_CONFIG
     ),
+    "C2B": lambda x: _adaptive_enhance(x, IMCRA_CONFIG),
 }
 
 
@@ -185,12 +208,31 @@ def initialize_neural() -> tuple[bool, str | None]:
     return available, reason
 
 
-def apply_candidate(candidate_id: str, x: np.ndarray, suppress_config: Optional[dict] = None) -> tuple[np.ndarray, dict]:
+def apply_candidate(
+    candidate_id: str,
+    x: np.ndarray,
+    suppress_config: Optional[dict] = None,
+    imcra_config: Optional[dict] = None,
+    oa_lambda: Optional[float] = None,
+) -> tuple[np.ndarray, dict]:
     """Run one registered candidate and return its measured processing metadata."""
     if candidate_id == "C2" and suppress_config is not None:
         audio, meta = suppress_module.suppress(
-            x, speech_mask_samples(x)[:len(x) // FRAME], analyze(x)["snr_db_est"], suppress_config
+            x, speech_mask_samples(x)[:len(x) // FRAME], analyze(x)["stationary_snr_db_est"], suppress_config
         )
+    elif candidate_id in {"C2B", "C2C"}:
+        config = {**IMCRA_CONFIG, **(imcra_config or {})}
+        enhanced, meta = _adaptive_enhance(x, config)
+        if candidate_id == "C2C":
+            coefficient = float(config["oa_lambda"] if oa_lambda is None else oa_lambda)
+            audio, oa_meta = imcra_module.add_observation(
+                enhanced, x, coefficient, float(config["peak_limit"]), config["oa_sweep"]
+            )
+            meta.update(oa_meta)
+            meta["config"]["oa_lambda"] = coefficient
+        else:
+            audio = enhanced
+        meta["parameters_fitted"] = bool(config.get("fitted", False))
     elif candidate_id in _CANDIDATE_APPLY:
         audio, meta = _CANDIDATE_APPLY[candidate_id](x)
     else:
@@ -202,6 +244,7 @@ def apply_candidate(candidate_id: str, x: np.ndarray, suppress_config: Optional[
     if candidate_id == "C2":
         config = suppress_config or SUPPRESS_CONFIG
         meta["parameters_fitted"] = bool(config.get("fitted", False))
+        meta["config"] = config
     peak = float(np.max(np.abs(audio))) if audio.size else 0.0
     if peak > 1.0:
         audio = (audio / peak * 0.99).astype(np.float32)
@@ -229,6 +272,8 @@ def guard(original: np.ndarray, candidate: np.ndarray, meta: Optional[dict] = No
     """Measure gain-invariant spectral distortion and compensated speech-energy change."""
     n = min(len(original), len(candidate))
     sm = speech_mask_samples(original)[:n].astype(bool)
+    n = min(n, len(sm))
+    sm = sm[:n]
     if sm.sum() < 1024:
         return {"checked": False, "reason": "too little speech detected to check",
                 "lsd_db": None, "speech_energy_change_db": None, "passed": None}
@@ -258,12 +303,17 @@ def guard(original: np.ndarray, candidate: np.ndarray, meta: Optional[dict] = No
 def load_router_config(path: Path) -> dict:
     cfg = json.loads(path.read_text(encoding="utf-8"))
     cfg.setdefault("fitted", False)
+    cfg.setdefault("routing_estimator_validated", False)
     cfg.setdefault("guard", {"max_lsd_db": 6.0, "max_speech_energy_change_db": 12.0})
     return cfg
 
 
 def route(analysis: dict, available: Sequence[str], cfg: dict) -> tuple[str, str]:
-    snr = analysis.get("snr_db_est")
+    if cfg.get("fitted") is not True or cfg.get("routing_estimator_validated") is not True:
+        fallback = "C0" if "C0" in available else available[0]
+        reason = "router parameters are unfitted" if cfg.get("fitted") is not True else "SNR estimator is not validated"
+        return fallback, f"{reason}; using {fallback}"
+    snr = analysis.get("stationary_snr_db_est")
     if snr is None:
         return ("C0", "no speech detected, so the original audio is sent") if "C0" in available else (available[0], "no speech detected; using the first available variant")
     for rule in cfg["rules"]:

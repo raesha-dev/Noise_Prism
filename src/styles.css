@@ -935,6 +935,20 @@
   color: var(--wn-faint);
   margin-bottom: 14px;
 }
+.pipeline-select {
+  display: grid;
+  gap: 5px;
+  margin: 0 0 12px;
+  color: var(--wn-muted);
+  font-size: 11px;
+}
+.pipeline-select select {
+  width: 100%;
+}
+.pipeline-select + .mode-caption {
+  margin-top: -5px;
+  line-height: 1.45;
+}
 .run-button {
   width: 100%;
   gap: 8px;
@@ -1156,6 +1170,23 @@
   margin-top: 8px;
   font-size: 10px;
   color: var(--wn-faint);
+}
+.transcript-tts {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--wn-border);
+  border-radius: 10px;
+  background: var(--wn-panel-2);
+}
+.transcript-tts label {
+  color: var(--wn-muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+.transcript-tts audio {
+  width: 100%;
 }
 
 /* ---- Evaluation panel ---- */

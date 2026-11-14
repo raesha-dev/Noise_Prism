@@ -41,9 +41,9 @@ def create_app(processing_delay_s: float = 0.0) -> FastAPI:
     async def transcribe(
         request: Request,
         audio_file: UploadFile = File(...),
-        language_code: str = Form(...),
+        language_code: str | None = Form(None),
         model: str = Form(...),
-        format: str = Form(...),
+        format: str | None = Form(None),
     ):
         if not request.headers.get("x-api-key-id"):
             return _error(401, "AUTHENTICATION_REQUIRED", "X-API-Key-ID is required.")
@@ -51,10 +51,14 @@ def create_app(processing_delay_s: float = 0.0) -> FastAPI:
             return _error(400, "INVALID_AUDIO", "audio_file is required.")
         if model not in MODELS:
             return _error(400, "INVALID_MODEL", "model must be prisma-v2.5 or prisma-v3.0.")
+        if format not in {None, "verbatim", "transcribe", "codemix", "transliterate"}:
+            return _error(400, "INVALID_FORMAT", "format must be verbatim, transcribe, codemix, or transliterate.")
+        if format in {"codemix", "transliterate"} and model != "prisma-v3.0":
+            return _error(400, "INVALID_FORMAT", f"format={format} requires prisma-v3.0.")
+        if language_code is None and format == "transliterate" and model == "prisma-v3.0":
+            language_code = "indic-auto"
         if language_code not in LANGUAGES and not (language_code == "indic-auto" and model == "prisma-v3.0"):
             return _error(422, "INVALID_LANGUAGE", "language_code is not supported for this model.")
-        if format != "verbatim":
-            return _error(400, "INVALID_FORMAT", "format must be verbatim.")
         if active_request.locked():
             return _error(429, "RATE_LIMITED", "One request is already active.")
 

@@ -173,6 +173,17 @@ def main() -> int:
         folder = noise_dir / name
         folder.mkdir(parents=True, exist_ok=True)
         sf.write(folder / f"{name}.wav", _noise_samples(name, args.seed + len(name)), SAMPLE_RATE, subtype="PCM_16")
+    with (noise_dir / "LICENSES.csv").open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["file", "type", "source", "license", "note"])
+        writer.writeheader()
+        for name in ("white", "babble_like", "mains_hum", "horn_like"):
+            writer.writerow({
+                "file": f"{name}/{name}.wav",
+                "type": name,
+                "source": "project-generated synthetic noise",
+                "license": "Synthetic test fixture; no third-party source",
+                "note": "Generated for local pipeline tests only.",
+            })
 
     fields = ["id", "audio_path", "language", "reference", "speaker_id", "group"]
     with (samples_dir / "demo_manifest.csv").open("w", newline="", encoding="utf-8") as handle:

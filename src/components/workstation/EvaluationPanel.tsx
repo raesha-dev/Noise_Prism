@@ -27,6 +27,7 @@ const SECTION_LABELS: Record<EvaluationSection, string> = {
   ablation: "Ablation",
   snr: "SNR buckets",
   noise: "Noise type",
+  source_type: "Source type",
 };
 const EMPTY_REPORT: EvaluationReport = {
   available: false,
@@ -104,7 +105,9 @@ export function EvaluationPanel({
   }
 
   function exportCsv() {
-    const lines = ["section,id,pipeline,wer,cer,latency_ms"];
+    const lines = [
+      "section,id,pipeline,wer,cer,latency_ms,failed_requests,empty_transcripts,truncated_responses",
+    ];
     for (const [name, list] of Object.entries(active.sections)) {
       for (const row of list ?? [])
         lines.push(
@@ -115,6 +118,9 @@ export function EvaluationPanel({
             row.wer ?? "",
             row.cer ?? "",
             row.latencyMs ?? "",
+            row.failedRequests ?? "",
+            row.emptyTranscripts ?? "",
+            row.truncatedResponses ?? "",
           ].join(","),
         );
     }
@@ -230,6 +236,7 @@ export function EvaluationPanel({
                     <th>WER ↓</th>
                     <th>CER ↓</th>
                     <th>Latency</th>
+                    <th>Failed / empty / truncated</th>
                     {section === "comparison" && <th>Δ vs C0</th>}
                   </tr>
                 </thead>
@@ -244,6 +251,13 @@ export function EvaluationPanel({
                         {row.latencyMs == null
                           ? "—"
                           : `${Math.round(row.latencyMs).toLocaleString()} ms`}
+                      </td>
+                      <td>
+                        {row.failedRequests == null &&
+                        row.emptyTranscripts == null &&
+                        row.truncatedResponses == null
+                          ? "—"
+                          : `${row.failedRequests ?? 0} / ${row.emptyTranscripts ?? 0} / ${row.truncatedResponses ?? 0}`}
                       </td>
                       {section === "comparison" && (
                         <td>

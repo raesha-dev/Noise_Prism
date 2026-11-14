@@ -1,0 +1,17 @@
+{
+  "routing_enabled": false,
+  "selected_estimator": null,
+  "estimators": {
+    "stationary_snr_db_est": {
+      "implemented": true,
+      "validated": false,
+      "note": "Compares speech-frame energy to the quietest 20% of frames; does not capture overlapping noise."
+    },
+    "wada_snr_db": {
+      "implemented": false,
+      "validated": false,
+      "source": "Kim and Stern, Interspeech 2008",
+      "note": "Implementation is blocked until the paper equation is verified."
+    }
+  }
+}

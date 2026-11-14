@@ -35,6 +35,15 @@ def _contains_mock(rows: list[dict[str, str]]) -> bool:
     )
 
 
+def _validate_development_split(rows: list[dict[str, str]], description: str) -> bool:
+    labels = {row.get("split", "").strip().lower() for row in rows if row.get("split", "").strip()}
+    if labels & {"held-out", "heldout", "test"}:
+        raise ValueError(f"{description} contains held-out/test rows; router fitting is development-only.")
+    if labels - {"development", "dev"}:
+        raise ValueError(f"{description} has an unsupported split label: {', '.join(sorted(labels))}.")
+    return bool(labels)
+
+
 def _validate_min_dev_clips(count: int) -> None:
     if count < MIN_DEV_CLIPS:
         raise ValueError(f"At least {MIN_DEV_CLIPS} eligible development clips are required; received {count}.")
@@ -44,28 +53,46 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--candidate", action="append", required=True, metavar="CANDIDATE=CSV",
                         help="Dev results; repeat for each candidate including C0")
-    parser.add_argument("--snr-csv", type=Path, required=True, help="Clip ids and measured snr_db_est")
+    parser.add_argument(
+        "--snr-csv", type=Path, required=True,
+        help="Clip ids and stationary_snr_db_est values",
+    )
     parser.add_argument("--repeat-a", type=Path, required=True, help="First same-audio repeat run")
     parser.add_argument("--repeat-b", type=Path, required=True, help="Second same-audio repeat run")
+    parser.add_argument("--snr-estimator", choices=("stationary_snr_db_est", "wada_snr_db"),
+                        default="stationary_snr_db_est")
     parser.add_argument("--output", type=Path, default=Path(__file__).resolve().parents[1] / "config" / "router.json")
     parser.add_argument("--seed", type=int, default=0, help="Reserved deterministic seed for fitting metadata")
     args = parser.parse_args()
     results: dict[str, dict[str, dict[str, str]]] = {}
+    split_verified = True
     for specification in args.candidate:
         try:
             candidate, filename = specification.split("=", 1)
         except ValueError:
             parser.error("--candidate values must be CANDIDATE=CSV.")
         rows = _read(Path(filename))
+        try:
+            split_verified &= _validate_development_split(rows, f"{candidate} results")
+        except ValueError as exc:
+            parser.error(str(exc))
         if _contains_mock(rows):
             parser.error("Mock transcripts are plumbing placeholders and cannot be used to fit the router.")
         results[candidate] = {row["id"]: row for row in rows}
     if "C0" not in results:
         parser.error("A C0 baseline is required.")
+    snr_config_path = Path(__file__).resolve().parents[1] / "config" / "snr_estimators.json"
+    try:
+        snr_config = json.loads(snr_config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        parser.error(f"Cannot read SNR estimator validation state: {type(exc).__name__}.")
+    estimator = snr_config.get("estimators", {}).get(args.snr_estimator, {})
+    if snr_config.get("routing_enabled") is not True or estimator.get("validated") is not True:
+        parser.error("SNR routing is disabled until the selected estimator validates on development mixtures.")
     snr_rows = _read(args.snr_csv)
     snr_by_id: dict[str, float] = {}
     for row in snr_rows:
-        value = row.get("snr_db_est") or row.get("snr_db") or row.get("snr")
+        value = row.get(args.snr_estimator)
         try:
             parsed = float(value)
         except (TypeError, ValueError):
@@ -77,6 +104,11 @@ def main() -> None:
         parser.error("No clip ids overlap between the SNR estimates and dev baseline.")
     repeat_a = {row["id"]: row for row in _read(args.repeat_a)}
     repeat_b = {row["id"]: row for row in _read(args.repeat_b)}
+    try:
+        split_verified &= _validate_development_split(list(repeat_a.values()), "First repeat run")
+        split_verified &= _validate_development_split(list(repeat_b.values()), "Second repeat run")
+    except ValueError as exc:
+        parser.error(str(exc))
     if _contains_mock(list(repeat_a.values()) + list(repeat_b.values())):
         parser.error("Mock transcripts are plumbing placeholders and cannot be used to fit the router.")
     repeat_ids = set(repeat_a) & set(repeat_b)
@@ -133,11 +165,13 @@ def main() -> None:
         rules = [{"min_snr_db": -100, "variant": "C0"}]
     fitted = {
         "fitted": True,
+        "routing_estimator_validated": True,
+        "routing_estimator": args.snr_estimator,
         "note": (
             "Fitted using development rows only; test rows were not read. No candidate beat the original "
             "by more than the measured repeat-run noise floor; all SNR ranges route to C0."
             if not accepted else "Fitted using development rows only; test rows were not read."
-        ),
+        ) + ("" if split_verified else " Split labels were absent, so development provenance was not verified."),
         "rules": rules,
         "fallback_chain": ["C2", "C1", "C0"],
         "guard": {"max_lsd_db": 6.0, "max_speech_energy_change_db": 12.0},
@@ -146,6 +180,7 @@ def main() -> None:
             "routed_word_errors": best_errors, "improvement_word_errors": improvement,
             "repeat_run_noise_floor_word_errors": noise_floor,
             "selected_rules_beat_noise_floor": accepted,
+            "split_verified": split_verified,
             "seed": args.seed,
         },
     }

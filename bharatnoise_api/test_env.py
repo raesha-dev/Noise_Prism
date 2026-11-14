@@ -10,10 +10,47 @@ import numpy as np
 import soundfile as sf
 
 from . import env as env_loader
+from .scripts.preflight_gnani import PreflightFailure, _validate_rest_body
 from .server import Settings
 
 PACKAGE = Path(__file__).resolve().parent
 ROOT = PACKAGE.parent
+
+
+def test_preflight_accepts_documented_optional_rest_fields():
+    body = {
+        "success": True,
+        "request_id": "request-id",
+        "transcript": "",
+        "model": "prisma-v2.5",
+        "processing_time": 0.1,
+        "end_to_end_latency": 0.2,
+    }
+
+    _validate_rest_body(body, "prisma-v2.5", "live")
+
+
+def test_preflight_validates_optional_rest_fields_when_present():
+    body = {
+        "success": True,
+        "request_id": "request-id",
+        "transcript": "text",
+        "model": "prisma-v3.0",
+        "processing_time": 0.1,
+        "end_to_end_latency": 0.2,
+        "detected_language_code": "hi-IN",
+        "truncated": True,
+    }
+
+    _validate_rest_body(body, "prisma-v3.0", "live")
+
+    body["truncated"] = "false"
+    try:
+        _validate_rest_body(body, "prisma-v3.0", "live")
+    except PreflightFailure as exc:
+        assert "truncated has an invalid type" in str(exc)
+    else:
+        raise AssertionError("Invalid optional truncated field was accepted.")
 
 
 def test_default_cors_includes_the_vite_development_origin():
@@ -56,7 +93,7 @@ def _free_port() -> int:
 
 def test_preflight_returns_three_without_a_key():
     environment = os.environ.copy()
-    environment.pop("GNANI_API_KEY", None)
+    environment["GNANI_API_KEY"] = ""
     result = subprocess.run(
         [sys.executable, str(PACKAGE / "scripts" / "preflight_gnani.py")],
         cwd=ROOT, env=environment, capture_output=True, text=True, timeout=10,

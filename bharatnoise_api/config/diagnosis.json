@@ -1,0 +1,5 @@
+{
+  "fitted": false,
+  "too_short_words_per_second_threshold": 0.5,
+  "threshold_note": "Unfitted heuristic for diagnosis only; do not use for routing or accuracy claims."
+}

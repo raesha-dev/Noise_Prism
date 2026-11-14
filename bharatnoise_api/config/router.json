@@ -1,10 +1,9 @@
 {
   "fitted": false,
-  "note": "PLACEHOLDER thresholds. Fit on the development set, then set fitted to true. The API reports this flag with every routing decision.",
-  "rules": [
-    { "min_snr_db": 15, "variant": "C1" },
-    { "min_snr_db": -100, "variant": "C2" }
-  ],
-  "fallback_chain": ["C1", "C0"],
+  "routing_estimator_validated": false,
+  "baseline_only": true,
+  "note": "Conservative baseline-only route. The stationary-noise estimate is unvalidated; C0 remains selected until development evidence supports a change.",
+  "rules": [{ "min_snr_db": -100, "variant": "C0" }],
+  "fallback_chain": ["C0"],
   "guard": { "max_lsd_db": 6.0 }
 }

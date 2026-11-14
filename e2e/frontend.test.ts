@@ -231,6 +231,8 @@ describe("frontend end-to-end mock stack", () => {
         mode: "fast",
         candidates: ["C0", "C1", "C2"],
         asrModel: "prisma-v2.5",
+        outputFormat: "auto",
+        languageCode: "hi-IN",
         compareModels: false,
         timeoutMs: 90_000,
       });
@@ -277,7 +279,8 @@ describe("frontend end-to-end mock stack", () => {
           }
           if (message.type === "transcript" && message.text.startsWith("[MOCK]"))
             resolveTranscript(message.text);
-          if (message.type === "error") rejectLive(new Error("The live proxy returned an error."));
+          if (message.type === "error")
+            rejectLive(new Error(`The live proxy returned an error: ${message.message}`));
         },
         onStats: (stats) => {
           framesSent = stats.framesSent;

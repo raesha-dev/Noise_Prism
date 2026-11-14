@@ -53,9 +53,10 @@ def test_synthetic_dataset_pipeline_never_aggregates_mock_as_benchmark(tmp_path)
     assert index
     assert all(entry["description"].startswith("synthetic") for entry in index)
     assert all("reference" not in entry for entry in index if entry["group"] == "synthetic_tone")
-    assert {path.name for path in (data / "noise").iterdir()} == {
+    assert {path.name for path in (data / "noise").iterdir() if path.is_dir()} == {
         "white", "babble_like", "mains_hum", "horn_like",
     }
+    assert (data / "noise" / "LICENSES.csv").is_file()
 
     clean = tmp_path / "clean"
     prepared = _run(
@@ -75,7 +76,7 @@ def test_synthetic_dataset_pipeline_never_aggregates_mock_as_benchmark(tmp_path)
         PACKAGE / "scripts" / "build_eval_set.py",
         ["--manifest", str(clean / "dev.csv"), "--noise-dir", str(data / "noise"),
          "--output-dir", str(mixed), "--snrs", "0", "5", "10",
-         "--test-fraction", "0.25", "--seed", "23"],
+         "--test-fraction", "0.25", "--seed", "23", "--legacy-plumbing-only"],
         ROOT,
     )
     assert built.returncode == 0, built.stdout + built.stderr
@@ -105,6 +106,36 @@ def test_synthetic_dataset_pipeline_never_aggregates_mock_as_benchmark(tmp_path)
     candidate_ids = [_rows(candidates_dir / f"{candidate}.csv") for candidate in ("C0", "C1", "C2")]
     expected_ids = sorted(row["id"] for row in candidate_ids[0])
     assert all(sorted(row["id"] for row in rows) == expected_ids for rows in candidate_ids)
+
+    sweep_source = tmp_path / "one-clip.csv"
+    sweep_row = dict(mixed_dev[0])
+    sweep_row["audio_path"] = str((mixed / sweep_row["audio_path"]).resolve())
+    with sweep_source.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(sweep_row))
+        writer.writeheader()
+        writer.writerow(sweep_row)
+    research_candidates = tmp_path / "research-candidates"
+    sweep = _run(
+        PACKAGE / "scripts" / "make_candidate_manifests.py",
+        [
+            "--manifest", str(sweep_source),
+            "--output-dir", str(research_candidates),
+            "--candidates", "C2B", "C2C",
+            "--seed", "31",
+        ],
+        ROOT,
+    )
+    assert sweep.returncode == 0, sweep.stdout + sweep.stderr
+    c2b = _rows(research_candidates / "C2B.csv")
+    assert json.loads(c2b[0]["processing_parameters"])["parameters_fitted"] is False
+    for coefficient in (0, 0.05, 0.1, 0.2, 0.3, 0.4):
+        manifest_path = research_candidates / f"C2C_lambda{coefficient:g}.csv"
+        row = _rows(manifest_path)[0]
+        assert row["candidate"] == f"C2C_lambda{coefficient:g}"
+        assert float(row["oa_lambda"]) == coefficient
+        metadata = json.loads(row["processing_parameters"])
+        assert metadata["parameters_fitted"] is False
+        assert metadata["observation_addition_lambda"] == coefficient
 
     port = _free_port()
     environment = os.environ.copy()

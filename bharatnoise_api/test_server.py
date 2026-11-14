@@ -21,11 +21,11 @@ from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 try:
-    from .gnani_client import FatalAPIError, Transcript
+    from .gnani_client import FatalAPIError, GnaniClient, Transcript
     from .server import Settings, create_app
     from . import pipeline as pl
 except ImportError:
-    from gnani_client import FatalAPIError, Transcript
+    from gnani_client import FatalAPIError, GnaniClient, Transcript
     from server import Settings, create_app
     import pipeline as pl
 
@@ -53,13 +53,12 @@ class FakeClient:
         if self.raises:
             raise self.raises
         variant = Path(path).stem
-        self.calls.append((variant, model, language))
+        self.calls.append((variant, model, language, fmt))
         if not self.ok:
             return Transcript(ok=False, error="HTTP 400 EMPTY_AUDIO: nothing")
         text = self.texts.get((variant, model), "[MOCK] test utterance")
         return Transcript(ok=True, text=text, model=f"mock-prisma-{model}",
                           wall_seconds=time.monotonic() - started)
-
 
 def make_app(tmp_path, fake=None, **overrides):
     s = Settings(workdir=tmp_path / "work", results_dir=tmp_path / "results", samples_dir=tmp_path / "samples",
@@ -100,10 +99,15 @@ def test_health_and_config(tmp_path):
         cfg = c.get("/api/config").json()
         assert cfg["gnani_mode"] == "mock"
         avail = {x["id"]: x["available"] for x in cfg["candidates"]}
-        assert avail == {"C0": True, "C1": True, "C2": True, "C3": False}
+        assert avail == {
+            "C0": True, "C1": True, "C2": True,
+            "C2B": True, "C2C": True, "C3": False,
+        }
         assert {m["id"] for m in cfg["modes"]} == {"raw", "fast", "accuracy", "compare_all"}
         assert cfg["router"]["fitted"] is False
         assert cfg["suppression"]["fitted"] is False
+        assert cfg["imcra_omlsa"]["fitted"] is False
+        assert cfg["imcra_omlsa"]["oa_sweep"] == [0.0, 0.05, 0.1, 0.2, 0.3, 0.4]
         assert cfg["optional_features"]["deepfilternet"]["available"] is False
         assert cfg["optional_features"]["deepfilternet"]["reason"]
         assert cfg["live"]["frame_bytes"] == 1024 and cfg["live"]["frame_ms"] == 64
@@ -111,6 +115,7 @@ def test_health_and_config(tmp_path):
         assert c.get("/health").json()["status"] == "ok"
         paths = c.get("/openapi.json").json()["paths"]
         for path in ("/api/clips", "/api/jobs", "/api/score", "/api/results/compare", "/api/results/tables",
+                     "/api/results/{tag}/export",
                      "/process", "/evaluation"):
             assert path in paths
         for path, method, schema_name in (
@@ -120,6 +125,66 @@ def test_health_and_config(tmp_path):
         ):
             response_schema = paths[path][method]["responses"]["200"]["content"]["application/json"]["schema"]
             assert response_schema["$ref"].endswith(f"/{schema_name}")
+
+
+def test_tts_returns_audio_and_uses_multilingual_auto_mode(tmp_path, monkeypatch):
+    calls = []
+    transcript_audio = speechy_wav(seconds=0.1)
+
+    def fake_synthesize(self, text, *, language="auto"):
+        calls.append((text, language))
+        return transcript_audio, "audio/wav"
+
+    monkeypatch.setenv("GNANI_API_KEY", "offline-test-key")
+    monkeypatch.setenv("GNANI_BASE_URL", "https://api.vachana.ai")
+    monkeypatch.setattr(GnaniClient, "synthesize", fake_synthesize)
+    settings = Settings(
+        workdir=tmp_path / "work",
+        results_dir=tmp_path / "results",
+        samples_dir=tmp_path / "samples",
+        config_dir=HERE / "config",
+        web_dir=tmp_path / "no-web",
+        daily_call_cap=50,
+    )
+    app = create_app(settings)
+    transcript = "नमस्ते, வணக்கம், hello"
+    with TestClient(app) as c:
+        before = c.get("/api/config").json()["budget"]["remaining"]
+        response = c.post("/api/tts", json={"text": transcript})
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("audio/wav")
+        assert response.content.startswith(b"RIFF")
+        assert calls == [(transcript, "auto")]
+        assert c.get("/api/config").json()["budget"]["remaining"] == before - 1
+
+
+def test_tts_rejects_blank_text_and_respects_demo_auth(tmp_path):
+    app, _ = make_app(tmp_path, demo_token="expected-token")
+    with TestClient(app) as c:
+        unauthorized = c.post("/api/tts", json={"text": "hello"})
+        assert unauthorized.status_code == 401
+        blank = c.post("/api/tts", json={"text": "   "}, headers={"X-Demo-Token": "expected-token"})
+        assert blank.status_code == 422
+        assert blank.json()["error"]["code"] == "EMPTY_TEXT"
+        live_only = c.post("/api/tts", json={"text": "hello"}, headers={"X-Demo-Token": "expected-token"})
+        assert live_only.status_code == 503
+        assert live_only.json()["error"]["code"] == "TTS_UNAVAILABLE"
+
+
+def test_results_export_supports_csv_and_json_with_safe_tags(tmp_path):
+    app, _ = make_app(tmp_path)
+    results_dir = tmp_path / "results"
+    results_dir.mkdir()
+    (results_dir / "C0.csv").write_text("id,candidate\nclip-1,C0\n", encoding="utf-8")
+    with TestClient(app) as client:
+        json_response = client.get("/api/results/C0/export?format=json")
+        csv_response = client.get("/api/results/C0/export?format=csv")
+        assert json_response.status_code == 200
+        assert json_response.json() == [{"id": "clip-1", "candidate": "C0"}]
+        assert csv_response.status_code == 200
+        assert csv_response.headers["content-type"].startswith("text/csv")
+        assert csv_response.text == "id,candidate\nclip-1,C0\n"
+        assert client.get("/api/results/../outside/export").status_code in {404, 422}
 
 
 def test_app_creation_does_not_create_data_directories(tmp_path, monkeypatch):
@@ -154,7 +219,7 @@ def test_clip_lifecycle(tmp_path):
         assert body["variants"] == ["C0", "C1", "C2"]
         a = body["analysis"]
         assert a["duration_s"] == pytest.approx(2.0, abs=0.01)
-        assert a["snr_db_est"] is not None and a["segments"]
+        assert a["stationary_snr_db_est"] is not None and a["segments"]
 
         for v in ("C0", "C1", "C2"):
             audio = c.get(f"/api/clips/{cid}/audio", params={"variant": v})
@@ -178,6 +243,23 @@ def test_candidate_outputs_are_finite_and_limited():
         assert np.isfinite(output).all()
         assert np.max(np.abs(output)) <= 1.0
         assert np.isfinite(meta["gain_applied_db"])
+
+
+def test_frontend_process_accepts_audio_not_aligned_to_vad_frames(tmp_path):
+    app, _ = make_app(tmp_path)
+    with TestClient(app) as c:
+        body = {
+            "mode": "max", "sample_rate": "8000", "channels": "1", "sample_format": "pcm_s16le",
+            "asr_provider": "gnani_prisma", "asr_model": "prisma-v2.5",
+            "language_code": "hi-IN", "format": "auto",
+            "candidates": "C0,C1,C2", "selection": "consensus", "compare_models": "false",
+        }
+        response = c.post(
+            "/process",
+            files={"file": ("unaligned.wav", speechy_wav(0.51, sr=8000), "audio/wav")},
+            data=body,
+        )
+        assert response.status_code == 200, response.text
 
 
 def test_upload_validation(tmp_path):
@@ -236,7 +318,7 @@ def test_raw_job_with_score(tmp_path):
         assert res["score_suppressed_reason"] == "mock"
         assert res["model"] == "mock-prisma-v2.5"
         assert res["chosen"]["text"].startswith("[MOCK]")
-        assert res["api_calls"] == 1 and fake.calls == [("C0", "v2.5", "hi-IN")]
+        assert res["api_calls"] == 1 and fake.calls == [("C0", "v2.5", "hi-IN", "verbatim")]
         assert j["steps"]
 
 
@@ -247,10 +329,25 @@ def test_fast_job_routes_guards_and_flags_unfitted_router(tmp_path):
         j = run_job(c, cid, mode="fast", language="hi-IN", model="v3.0")
         assert j["status"] == "done", j
         d = j["result"]["decision"]
-        assert d["routed_to"] == "C1" and d["router_fitted"] is False
+        assert d["routed_to"] == "C0" and d["router_fitted"] is False
         assert d["guard"]["checked"] is True and "lsd_db" in d["guard"]
         assert j["result"]["router_note"]
         assert len(fake.calls) == 1 and fake.calls[0][1] == "v3.0"
+
+
+def test_router_ignores_placeholder_snr_rules_even_if_marked_fitted():
+    variant, note = pl.route(
+        {"stationary_snr_db_est": 30.0},
+        ["C0", "C1", "C2"],
+        {
+            "fitted": True,
+            "routing_estimator_validated": False,
+            "rules": [{"min_snr_db": -100, "variant": "C2"}],
+        },
+    )
+
+    assert variant == "C0"
+    assert "SNR estimator is not validated" in note
 
 
 def test_compare_all_job(tmp_path):
@@ -277,15 +374,21 @@ def test_frontend_process_contract_and_measured_scores(tmp_path):
         result = response.json()
         assert result["selected_candidate"] in {"C0", "C1", "C2"}
         assert set(result) == {
-            "request_id", "gnani_mode", "selected_candidate", "transcription", "candidates", "analysis",
-            "evaluation", "pipeline", "latency_ms", "router_fitted", "suppression_fitted",
+            "request_id", "gnani_mode", "output_format", "language_code", "detected_language_code",
+            "unavailable_candidates", "selected_candidate", "transcription", "candidates",
+            "analysis", "evaluation", "pipeline",
+            "latency_ms", "router_fitted", "suppression_fitted",
             "score_suppressed_reason",
         }
+        assert result["output_format"] == "verbatim"
+        assert result["language_code"] == "hi-IN"
+        assert isinstance(result["unavailable_candidates"], dict)
         assert set(result["candidates"][result["selected_candidate"]]) == {
             "transcript", "audio_url", "peaks", "guard_score", "confidence", "snr_db",
+            "error", "truncated", "parameters",
         }
         assert set(result["analysis"]) == {
-            "snr_db", "noise_floor_db", "speech_energy_db", "vad_segments", "guard_status",
+            "stationary_snr_db_est", "noise_floor_db", "speech_energy_db", "vad_segments", "guard_status",
             "guard_result", "spectrum",
         }
         assert result["gnani_mode"] == "mock"
@@ -295,6 +398,7 @@ def test_frontend_process_contract_and_measured_scores(tmp_path):
         assert result["evaluation"]["wer"] is None
         assert set(result["evaluation"]) == {"wer", "cer", "latency_ms", "calls", "note"}
         assert fake.calls and len(fake.calls) == 1
+        assert fake.calls[0][3] is None
 
         body.update({"mode": "max", "selection": "consensus"})
         response = c.post(
@@ -309,6 +413,156 @@ def test_frontend_process_contract_and_measured_scores(tmp_path):
         assert result["evaluation"]["calls"] == 3
 
 
+def test_max_keeps_empty_transcripts_out_of_consensus_and_reports_failures(tmp_path):
+    class PartialClient(FakeClient):
+        def transcribe(self, path, language, *, model="v2.5", fmt="verbatim", run_id=0, extra=None, use_cache=True):
+            variant = Path(path).stem
+            if variant == "C1":
+                self.calls.append((variant, model, language, fmt))
+                return Transcript(ok=False, error="HTTP 400 BAD_REQUEST")
+            if variant == "C0":
+                self.texts[("C0", model)] = ""
+            if variant == "C2":
+                self.texts[("C2", model)] = "[MOCK] recognized words"
+            return super().transcribe(
+                path, language, model=model, fmt=fmt, run_id=run_id, extra=extra, use_cache=use_cache
+            )
+
+    app, fake = make_app(tmp_path, PartialClient())
+    with TestClient(app) as c:
+        response = c.post(
+            "/process",
+            files={"file": ("sample.wav", speechy_wav(), "audio/wav")},
+            data={
+                "mode": "max", "sample_rate": "8000", "channels": "1",
+                "sample_format": "pcm_s16le", "asr_provider": "gnani_prisma",
+                "asr_model": "prisma-v2.5", "candidates": "C0,C1,C2",
+                "selection": "consensus", "compare_models": "false",
+            },
+        )
+
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["selected_candidate"] == "C2"
+    assert result["transcription"] == "[MOCK] recognized words"
+    assert result["candidates"]["C0"]["transcript"] == ""
+    assert result["candidates"]["C1"]["error"] == "HTTP 400 BAD_REQUEST"
+    assert result["candidates"]["C2"]["truncated"] is False
+    assert len(fake.calls) == 3
+
+
+def test_max_with_only_empty_transcripts_returns_diagnostic_result(tmp_path):
+    fake = FakeClient(texts={
+        ("C0", "v2.5"): "",
+        ("C1", "v2.5"): "",
+        ("C2", "v2.5"): "",
+    })
+    app, _ = make_app(tmp_path, fake)
+    with TestClient(app) as c:
+        response = c.post(
+            "/process",
+            files={"file": ("sample.wav", speechy_wav(), "audio/wav")},
+            data={
+                "mode": "max", "sample_rate": "8000", "channels": "1",
+                "sample_format": "pcm_s16le", "asr_provider": "gnani_prisma",
+                "asr_model": "prisma-v2.5", "candidates": "C0,C1,C2",
+                "selection": "consensus", "compare_models": "false",
+            },
+        )
+
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["selected_candidate"] == "C0"
+    assert result["transcription"] == ""
+    assert all(candidate["transcript"] == "" for candidate in result["candidates"].values())
+
+
+def test_experimental_candidates_are_configurable_and_report_parameters(tmp_path):
+    app, fake = make_app(tmp_path)
+    with TestClient(app) as c:
+        response = c.post(
+            "/process",
+            files={"file": ("sample.wav", speechy_wav(), "audio/wav")},
+            data={
+                "mode": "max", "sample_rate": "8000", "channels": "1",
+                "sample_format": "pcm_s16le", "asr_provider": "gnani_prisma",
+                "asr_model": "prisma-v3.0", "language_code": "hi-IN",
+                "candidates": "C0,C2B,C2C", "selection": "consensus",
+                "compare_models": "false", "oa_lambda": "0.3",
+            },
+        )
+
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert set(result["candidates"]) == {"C0", "C2B", "C2C"}
+    assert result["candidates"]["C2B"]["parameters"]["algorithm"] == (
+        "simplified adaptive spectral gain + VAD-gated speech leveling"
+    )
+    assert result["candidates"]["C2B"]["parameters"]["voice_focus"]["applied"] is True
+    assert result["candidates"]["C2B"]["parameters"]["parameters_fitted"] is False
+    assert result["candidates"]["C2C"]["parameters"]["observation_addition_lambda"] == 0.3
+    assert result["candidates"]["C2C"]["parameters"]["observation_addition_mode"] == (
+        "enhanced + lambda * original"
+    )
+    assert len(fake.calls) == 3
+
+
+def test_experimental_candidate_rejects_invalid_oa_lambda(tmp_path):
+    app, _ = make_app(tmp_path)
+    with TestClient(app) as c:
+        response = c.post(
+            "/process",
+            files={"file": ("sample.wav", speechy_wav(), "audio/wav")},
+            data={
+                "mode": "max", "sample_rate": "8000", "channels": "1",
+                "sample_format": "pcm_s16le", "asr_provider": "gnani_prisma",
+                "asr_model": "prisma-v3.0", "candidates": "C0,C2C",
+                "selection": "consensus", "compare_models": "false", "oa_lambda": "0.7",
+            },
+        )
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "BAD_OA_LAMBDA"
+
+
+def test_frontend_process_passes_prisma_format_and_auto_language(tmp_path):
+    app, fake = make_app(tmp_path)
+    with TestClient(app) as c:
+        response = c.post(
+            "/process",
+            files={"file": ("sample.wav", speechy_wav(), "audio/wav")},
+            data={
+                "mode": "fast", "sample_rate": "8000", "channels": "1",
+                "sample_format": "pcm_s16le", "asr_provider": "gnani_prisma",
+                "asr_model": "prisma-v3.0", "language_code": "indic-auto",
+                "format": "codemix", "candidates": "C0,C1,C2",
+                "selection": "snr_router", "compare_models": "false",
+            },
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["output_format"] == "codemix"
+        assert response.json()["language_code"] == "indic-auto"
+        assert fake.calls and fake.calls[0][2:] == ("indic-auto", "codemix")
+
+
+def test_frontend_auto_format_uses_gnani_model_language_default(tmp_path):
+    app, fake = make_app(tmp_path)
+    with TestClient(app) as c:
+        response = c.post(
+            "/process",
+            files={"file": ("sample.wav", speechy_wav(), "audio/wav")},
+            data={
+                "mode": "fast", "sample_rate": "8000", "channels": "1",
+                "sample_format": "pcm_s16le", "asr_provider": "gnani_prisma",
+                "asr_model": "prisma-v3.0", "language_code": "hi-IN",
+                "candidates": "C0,C1,C2", "selection": "snr_router",
+                "compare_models": "false",
+            },
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["output_format"] == "transcribe"
+        assert fake.calls and fake.calls[0][3] is None
+
+
 def test_aggregate_routes_are_explicit_when_missing(tmp_path):
     app, _ = make_app(tmp_path)
     with TestClient(app) as c:
@@ -320,7 +574,7 @@ def test_aggregate_routes_are_explicit_when_missing(tmp_path):
             "dataset": None,
             "clip_count": None,
             "measured_at": None,
-            "sections": {"comparison": [], "ablation": [], "snr": [], "noise": []},
+            "sections": {"comparison": [], "ablation": [], "snr": [], "noise": [], "source_type": []},
         }
         result = c.get("/api/results/tables")
         assert result.status_code == 404
@@ -330,7 +584,7 @@ def test_aggregate_routes_are_explicit_when_missing(tmp_path):
 def test_build_eval_set_meets_snr_and_speaker_split(tmp_path):
     data = tmp_path / "source"
     audio_dir = data / "audio"
-    noise_dir = tmp_path / "noise" / "street"
+    noise_dir = tmp_path / "noise" / "street" / "dev"
     audio_dir.mkdir(parents=True)
     noise_dir.mkdir(parents=True)
     rng = np.random.default_rng(42)
@@ -348,11 +602,19 @@ def test_build_eval_set_meets_snr_and_speaker_split(tmp_path):
         writer.writeheader()
         writer.writerows(clean_rows)
     sf.write(noise_dir / "noise.wav", (0.05 * rng.standard_normal(8000)).astype(np.float32), 8000)
+    with (tmp_path / "noise" / "LICENSES.csv").open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["file", "type", "source", "license", "note"])
+        writer.writeheader()
+        writer.writerow({
+            "file": "street/dev/noise.wav", "type": "synthetic",
+            "source": "synthetic test fixture", "license": "synthetic",
+            "note": "Test-only generated noise.",
+        })
     output = tmp_path / "eval"
     script = Path(__file__).parent / "scripts" / "build_eval_set.py"
     subprocess.run(
         [sys.executable, str(script), "--manifest", str(data / "clean.csv"), "--noise-dir", str(tmp_path / "noise"),
-         "--output-dir", str(output), "--snrs", "0", "5", "10", "--seed", "17"],
+         "--output-dir", str(output), "--snrs", "0", "5", "10", "--seed", "17", "--legacy-plumbing-only"],
         check=True, capture_output=True, text=True,
     )
     log = json.loads((output / "build_log.json").read_text(encoding="utf-8"))
@@ -493,8 +755,9 @@ def test_results_routes(tmp_path):
     with TestClient(app) as c:
         assert {x["tag"]: x["rows"] for x in c.get("/api/results").json()} == {"A": 8, "B": 8}
         r = c.get("/api/results/compare", params={"a": "A", "b": "B", "by": "group", "n_boot": 300}).json()
-        assert r["overall"]["wer"]["delta"] == pytest.approx(-0.25)
-        assert r["overall"]["B_better"] == 8 and set(r["by"]) == {"g0", "g1"}
+        assert r["overall"]["n_source_clips"] == 8 and r["overall"]["underpowered"] is True
+        assert r["overall"]["wer"]["delta"] is None
+        assert r["overall"]["B_better"] is None and set(r["by"]) == {"g0", "g1"}
         assert len(c.get("/api/results/A/rows", params={"group": "g0"}).json()) == 4
         assert c.get("/api/results/compare", params={"a": "../x", "b": "B"}).json()["error"]["code"] == "BAD_TAG"
         assert c.get("/api/results/compare", params={"a": "A", "b": "missing"}).json()["error"]["code"] == "RESULTS_NOT_FOUND"

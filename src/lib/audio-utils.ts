@@ -220,6 +220,11 @@ export function encodeWav(samples: Float32Array, sampleRate: number): Blob {
   return new Blob([encodeWavBuffer(samples, sampleRate)], { type: "audio/wav" });
 }
 
+export function makeWavFile(samples: Float32Array, sampleRate: number, sourceName: string): File {
+  const stem = sourceName.replace(/\.[^/.]+$/, "") || "audio";
+  return new File([encodeWav(samples, sampleRate)], `${stem}.wav`, { type: "audio/wav" });
+}
+
 export function encodeWavBuffer(samples: Float32Array, sampleRate: number): ArrayBuffer {
   const buffer = new ArrayBuffer(44 + samples.length * 2);
   const view = new DataView(buffer);

@@ -3,8 +3,20 @@ import type { TrackId } from "@/lib/bharatnoise-api";
 export const trackDefs: { id: TrackId; name: string; detail: string; color: "cyan" | "violet" }[] =
   [
     { id: "C0", name: "Original", detail: "Reference input", color: "cyan" },
-    { id: "C1", name: "Hygiene", detail: "Band-limit · hum notch · gain", color: "cyan" },
+    { id: "C1", name: "Hygiene", detail: "DC removal · telephone band · gain", color: "cyan" },
     { id: "C2", name: "Enhanced", detail: "Wiener / spectral gate · blend", color: "violet" },
+    {
+      id: "C2B",
+      name: "Adaptive spectral + voice focus",
+      detail: "VAD-gated noise attenuation and speech leveling; experimental",
+      color: "violet",
+    },
+    {
+      id: "C2C",
+      name: "Voice focus + observation addition",
+      detail: "C2B + λ × original; adds some original noise back",
+      color: "cyan",
+    },
     { id: "C3", name: "DeepFilterNet", detail: "8 → 48 → 8 kHz · optional", color: "cyan" },
   ];
 
@@ -12,7 +24,7 @@ export const trackName = (id: TrackId) => trackDefs.find((track) => track.id ===
 
 export const stageNames = [
   "Ingest & prepare",
-  "Analyse VAD / SNR",
+  "Analyse VAD / stationary-noise estimate",
   "Generate candidates",
   "Speech-preservation guard",
   "Route & transcribe",

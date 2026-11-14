@@ -136,7 +136,7 @@ export function AnalysisPanel({
           )}
         </div>
         <div className="metric-list">
-          <Metric label="Estimated SNR" value={formatDb(view.snrDb)} note={note} />
+          <Metric label="Stationary-noise estimate" value={formatDb(view.snrDb)} note={note} />
           <Metric
             label="Noise floor"
             value={formatDb(view.noiseFloorDb)}

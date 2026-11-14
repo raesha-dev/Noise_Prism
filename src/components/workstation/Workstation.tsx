@@ -19,18 +19,23 @@ import { Button } from "@/components/ui/button";
 import {
   TRACK_IDS,
   checkApiConnection,
+  fetchCandidateConfig,
   getApiBaseUrl,
   processAudioFile,
   saveApiBaseUrl,
   type AccuracyMode,
   type EvaluationReport,
   type HealthInfo,
+  type LanguageCode,
+  type OutputFormat,
   type ProcessingResult,
   type TrackId,
 } from "@/lib/bharatnoise-api";
 import {
   computePeaks,
   decodeToMono,
+  encodeWav,
+  makeWavFile,
   makeSampleClip,
   SAMPLE_CLIPS,
   type SampleKind,
@@ -87,8 +92,15 @@ export function Workstation() {
   const [healthError, setHealthError] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [asrModel, setAsrModel] = useState(ASR_MODELS[0]!.value);
+  const [languageCode, setLanguageCode] = useState<LanguageCode>("hi-IN");
+  const [outputFormat, setOutputFormat] = useState<OutputFormat>("auto");
   const [mode, setMode] = useState<AccuracyMode>("fast");
   const [includeC3, setIncludeC3] = useState(true);
+  const [includeResearchCandidates, setIncludeResearchCandidates] = useState(false);
+  const [oaLambda, setOaLambda] = useState(0.1);
+  const [oaSweep, setOaSweep] = useState<number[]>([]);
+  const [imcraFitted, setImcraFitted] = useState<boolean | null>(null);
+  const [imcraConfigError, setImcraConfigError] = useState("");
   const [compareModels, setCompareModels] = useState(false);
   const [clip, setClip] = useState<Clip | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
@@ -138,6 +150,22 @@ export function Workstation() {
         .catch((error: unknown) =>
           setHealthError(error instanceof Error ? error.message : "Service not reachable."),
         );
+      fetchCandidateConfig(saved)
+        .then((config) => {
+          setOaSweep(config.oaSweep);
+          setOaLambda(config.oaLambda);
+          setImcraFitted(config.fitted);
+          setImcraConfigError("");
+        })
+        .catch((error: unknown) => {
+          setOaSweep([]);
+          setImcraFitted(null);
+          setImcraConfigError(
+            error instanceof Error
+              ? `Experimental candidates unavailable: ${error.message}`
+              : "Could not load candidate settings.",
+          );
+        });
     }
   }, []);
 
@@ -216,10 +244,12 @@ export function Workstation() {
     try {
       const decoded = await decodeToMono(file);
       if (clipUrlRef.current !== url) return;
+      const serviceFile = makeWavFile(decoded.samples, decoded.sampleRate, file.name);
       setClip((current) =>
         current && current.url === url
           ? {
               ...current,
+              file: serviceFile,
               peaks: computePeaks(decoded.samples),
               duration: decoded.duration,
               sampleRate: decoded.sourceRate,
@@ -227,10 +257,19 @@ export function Workstation() {
             }
           : current,
       );
-      toast.success(`${file.name} is ready.`);
+      toast.success(
+        file.type === "audio/wav" || /\.wav$/i.test(file.name)
+          ? `${file.name} is ready.`
+          : `Converted ${file.name} to WAV and it is ready.`,
+      );
     } catch {
-      toast.warning(
-        "This browser could not decode the clip for preview. It can still be sent to your service.",
+      if (clipUrlRef.current === url) {
+        URL.revokeObjectURL(url);
+        clipUrlRef.current = "";
+        setClip(null);
+      }
+      toast.error(
+        "This browser could not decode the audio for WAV conversion. Try WAV, FLAC, OGG, MP3 or another browser-supported audio format.",
       );
     } finally {
       if (clipUrlRef.current === url) setAnalyzing(false);
@@ -266,21 +305,24 @@ export function Workstation() {
       recorder.addEventListener("dataavailable", (event) => {
         if (event.data.size) chunks.push(event.data);
       });
-      recorder.addEventListener("stop", () => {
+      recorder.addEventListener("stop", async () => {
         stream.getTracks().forEach((track) => track.stop());
         setRecording(false);
-        const type = recorder.mimeType || "audio/webm";
-        const ext = type.includes("ogg") ? "ogg" : type.includes("mp4") ? "m4a" : "webm";
-        const blob = new Blob(chunks, { type });
-        if (blob.size)
-          void loadClip(
-            new File(
-              [blob],
-              `recording-${new Date().toISOString().slice(11, 19).replace(/:/g, "")}.${ext}`,
-              { type },
-            ),
-            "recording",
+        const recording = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
+        if (!recording.size) {
+          toast.error("The recording was empty. Try recording again.");
+          return;
+        }
+        try {
+          const decoded = await decodeToMono(recording);
+          const wav = encodeWav(decoded.samples, decoded.sampleRate);
+          const name = `recording-${new Date().toISOString().slice(11, 19).replace(/:/g, "")}.wav`;
+          await loadClip(new File([wav], name, { type: "audio/wav" }), "recording");
+        } catch {
+          toast.error(
+            "Could not convert the recording to WAV. Try another browser or upload a WAV, FLAC or OGG file.",
           );
+        }
       });
       recorder.start(250);
       setRecordSeconds(0);
@@ -374,8 +416,21 @@ export function Workstation() {
   }, [togglePlay]);
 
   // ---------- Pipeline ----------
-  const requestedCandidates: TrackId[] = includeC3 ? [...TRACK_IDS] : ["C0", "C1", "C2"];
+  const requestedCandidates: TrackId[] = [
+    "C0",
+    "C1",
+    "C2",
+    ...(includeResearchCandidates ? (["C2B", "C2C"] as const) : []),
+    ...(includeC3 ? (["C3"] as const) : []),
+  ];
   const canTranscribe = health?.gnaniMode === "live" || health?.gnaniMode === "mock";
+  const changeAsrModel = (model: string) => {
+    setAsrModel(model);
+    if (model !== "prisma-v3.0") {
+      if (languageCode === "indic-auto") setLanguageCode("hi-IN");
+      if (outputFormat === "codemix" || outputFormat === "transliterate") setOutputFormat("auto");
+    }
+  };
 
   function addHistory(entry: HistoryEntry) {
     setHistory((current) => saveHistory([entry, ...current]));
@@ -383,6 +438,10 @@ export function Workstation() {
 
   async function runPipeline() {
     if (busy) return;
+    if (analyzing) {
+      toast("Wait for the audio conversion to finish before starting the pipeline.");
+      return;
+    }
     if (!clip) {
       toast("Add an audio clip or pick a sample first.");
       goTo("studio");
@@ -399,19 +458,21 @@ export function Workstation() {
     const controller = new AbortController();
     abortRef.current = controller;
     setBusy(true);
-    setStage(0);
+    setStage(-1);
     setResult(null);
     setResultSource(null);
     setRouted(null);
     setCandidatePeaks({});
 
-    const stageTimer = setInterval(() => setStage((value) => Math.min(value + 1, 3)), 900);
     try {
       const response = await processAudioFile(apiUrl, clip.file, {
         mode,
         candidates: requestedCandidates,
         asrModel,
+        outputFormat,
+        languageCode,
         compareModels,
+        oaLambda,
         signal: controller.signal,
       });
       setResult(response);
@@ -450,7 +511,6 @@ export function Workstation() {
         error instanceof Error ? error.message : "Audio processing could not be completed.",
       );
     } finally {
-      clearInterval(stageTimer);
       setBusy(false);
       abortRef.current = null;
     }
@@ -576,10 +636,22 @@ export function Workstation() {
 
   // ---------- Derived views ----------
   const tracks: TrackView[] = useMemo(() => {
-    const ids: TrackId[] = includeC3 ? [...TRACK_IDS] : ["C0", "C1", "C2"];
+    const ids: TrackId[] = ["C0", "C1", "C2"];
+    if (includeResearchCandidates) ids.push("C2B", "C2C");
+    if (includeC3) ids.push("C3");
     return ids.map((id) => {
       const candidate = result?.candidates[id];
       if (!clip) return { id, peaks: null, status: "pending", hasAudio: false };
+      const unavailableReason = result?.unavailableCandidates?.[id];
+      if (unavailableReason) {
+        return {
+          id,
+          peaks: null,
+          status: "unavailable",
+          hasAudio: false,
+          reason: unavailableReason,
+        };
+      }
       if (id === "C0")
         return {
           id,
@@ -596,7 +668,7 @@ export function Workstation() {
         hasAudio: Boolean(candidate?.audioUrl),
       };
     });
-  }, [clip, includeC3, result, candidatePeaks, resultSource]);
+  }, [clip, includeC3, includeResearchCandidates, result, candidatePeaks, resultSource]);
 
   const playbackNote =
     clip && selected !== "C0" && !selectedAudio
@@ -625,18 +697,36 @@ export function Workstation() {
 
   const transcripts: TranscriptView[] = useMemo(() => {
     const ids = TRACK_IDS.filter(
-      (id) => (checked.includes(id) || id === selected) && (includeC3 || id !== "C3"),
+      (id) =>
+        (checked.includes(id) || id === selected) &&
+        (includeC3 || id !== "C3") &&
+        (includeResearchCandidates || (id !== "C2B" && id !== "C2C")),
     );
     return ids.map((id) => {
       if (result && resultSource === "service") {
+        const candidate = result.candidates[id];
         const text =
-          result.candidates[id]?.transcript ??
+          candidate?.transcript ??
           (id === result.selectedCandidate ? result.transcription : undefined);
-        return { id, text, source: text ? "service" : "missing" };
+        const unavailable = result.unavailableCandidates?.[id];
+        const hasServiceResult = candidate !== undefined || id === result.selectedCandidate;
+        return {
+          id,
+          text,
+          source: hasServiceResult ? "service" : "missing",
+          reason: unavailable
+            ? `${id} unavailable: ${unavailable}`
+            : candidate?.error
+              ? `Prisma request failed: ${candidate.error}`
+              : hasServiceResult && !text?.trim()
+                ? "Gnani returned an empty transcript. Check the language setting and compare the original audio."
+                : undefined,
+          truncated: candidate?.truncated,
+        };
       }
       return { id, source: "missing" };
     });
-  }, [checked, selected, result, resultSource, includeC3]);
+  }, [checked, selected, result, resultSource, includeC3, includeResearchCandidates]);
   const baseline =
     transcripts.find((item) => item.id === "C0")?.text ??
     (resultSource === "service" ? result?.candidates.C0?.transcript : undefined);
@@ -684,7 +774,7 @@ export function Workstation() {
             <select
               aria-label="ASR model"
               value={asrModel}
-              onChange={(event) => setAsrModel(event.currentTarget.value)}
+              onChange={(event) => changeAsrModel(event.currentTarget.value)}
               disabled={!canTranscribe}
             >
               {ASR_MODELS.map((model) => (
@@ -788,6 +878,7 @@ export function Workstation() {
                   : null
               }
               analyzing={analyzing}
+              pipelineBusy={busy}
               tracks={tracks}
               selected={selected}
               onSelect={setSelected}
@@ -828,14 +919,32 @@ export function Workstation() {
               routeNote={routeNote}
               mode={mode}
               onMode={setMode}
+              model={asrModel}
+              languageCode={languageCode}
+              onLanguageCode={(language) => {
+                setLanguageCode(language);
+                if (language === "indic-auto") setCompareModels(false);
+              }}
+              outputFormat={outputFormat}
+              onOutputFormat={setOutputFormat}
               includeC3={includeC3}
               onIncludeC3={(value) => {
                 setIncludeC3(value);
                 if (!value && selected === "C3") setSelected("C2");
               }}
+              includeResearchCandidates={includeResearchCandidates}
+              onIncludeResearchCandidates={(value) => {
+                setIncludeResearchCandidates(value);
+                if (!value && (selected === "C2B" || selected === "C2C")) setSelected("C2");
+              }}
+              oaLambda={oaLambda}
+              oaSweep={oaSweep}
+              imcraFitted={imcraFitted}
+              imcraConfigError={imcraConfigError}
+              onOaLambda={setOaLambda}
               compareModels={compareModels}
               onCompareModels={setCompareModels}
-              canRun={canTranscribe}
+              canRun={canTranscribe && !analyzing}
               unavailableMessage={unavailableMessage}
               onRun={() => void runPipeline()}
               onCancel={() => abortRef.current?.abort()}
@@ -852,8 +961,14 @@ export function Workstation() {
               baseline={baseline ?? undefined}
               reference={reference}
               onReference={setReference}
+              mode={mode}
               modelLabel={mockMode ? `mock-${modelLabel}` : modelLabel}
+              requestedLanguageCode={result?.languageCode ?? languageCode}
+              outputFormat={result?.outputFormat ?? outputFormat}
+              detectedLanguageCode={result?.detectedLanguageCode ?? undefined}
               mockMode={mockMode}
+              onSelect={setSelected}
+              apiUrl={apiUrl}
             />
           </section>
 
@@ -927,6 +1042,9 @@ export function Workstation() {
           setApiUrl(saved);
           setHealth(null);
           setHealthError("");
+          setOaSweep([]);
+          setImcraFitted(null);
+          setImcraConfigError("");
           if (!saved) {
             setHealth(null);
             setHealthError("");
@@ -940,6 +1058,22 @@ export function Workstation() {
             .catch((error: unknown) => {
               setHealth(null);
               setHealthError(error instanceof Error ? error.message : "Service not reachable.");
+            });
+          fetchCandidateConfig(saved)
+            .then((config) => {
+              setOaSweep(config.oaSweep);
+              setOaLambda(config.oaLambda);
+              setImcraFitted(config.fitted);
+              setImcraConfigError("");
+            })
+            .catch((error: unknown) => {
+              setOaSweep([]);
+              setImcraFitted(null);
+              setImcraConfigError(
+                error instanceof Error
+                  ? `Experimental candidates unavailable: ${error.message}`
+                  : "Could not load candidate settings.",
+              );
             });
         }}
       />

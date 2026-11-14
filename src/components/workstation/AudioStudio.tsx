@@ -21,8 +21,9 @@ import { formatTime, trackDefs } from "./workstation-utils";
 export type TrackView = {
   id: TrackId;
   peaks: number[] | null;
-  status: "real" | "service" | "pending" | "skipped";
+  status: "real" | "service" | "pending" | "skipped" | "unavailable";
   hasAudio: boolean;
+  reason?: string | undefined;
 };
 
 type Props = {
@@ -33,6 +34,7 @@ type Props = {
     channels?: number | undefined;
   } | null;
   analyzing: boolean;
+  pipelineBusy: boolean;
   tracks: TrackView[];
   selected: TrackId;
   onSelect: (id: TrackId) => void;
@@ -59,7 +61,8 @@ const statusLabel: Record<TrackView["status"], string> = {
   real: "From your clip",
   service: "From service",
   pending: "Awaiting service result",
-  skipped: "Not requested",
+  skipped: "Not transcribed this run",
+  unavailable: "Unavailable",
 };
 
 export function AudioStudio(props: Props) {
@@ -229,7 +232,11 @@ export function AudioStudio(props: Props) {
                     aria-label={`Select ${track.id}`}
                   >
                     <span>
-                      {props.clip ? statusLabel[track.status] : "Add a clip to view its waveform"}
+                      {props.clip ? (
+                        <span title={track.reason}>{statusLabel[track.status]}</span>
+                      ) : (
+                        "Add a clip to view its waveform"
+                      )}
                     </span>
                   </button>
                 )}
@@ -314,6 +321,40 @@ export function AudioStudio(props: Props) {
             <>Add, record, or pick a synthetic sample clip to view its waveform.</>
           ))}
       </p>
+      <details className="processing-guide" open={props.pipelineBusy || undefined}>
+        <summary>What happens to uploaded audio?</summary>
+        {props.pipelineBusy && (
+          <p className="playback-note" role="status">
+            Processing request in progress. This upload endpoint returns only the final response, so
+            exact backend sub-step progress is not streamed; the sequence below explains what the
+            backend is doing.
+          </p>
+        )}
+        <ol>
+          <li>
+            <strong>Prepare in your browser:</strong> the file is decoded, downmixed to mono,
+            converted to WAV, and shown as a waveform. This step does not request a transcript.
+          </li>
+          <li>
+            <strong>When you press Run:</strong> the backend validates and resamples to 8 kHz,
+            estimates speech regions and noise, then builds only the requested audio candidates. C0
+            remains unchanged. C2B applies experimental spectral filtering, lowers detected
+            non-speech, and levels detected speech; C2C adds some original audio back, which can
+            also restore noise.
+          </li>
+          <li>
+            <strong>Transcribe:</strong> Fast mode sends only its routed candidate. Max requests the
+            selected candidates and compares their returned transcripts. Gnani requests run
+            serially; upload processing is not a continuous live stream. Use Live Monitor for
+            streaming audio.
+          </li>
+        </ol>
+        <p>
+          Voice activity detection cannot determine microphone distance or remove noise that
+          overlaps speech perfectly. C2B/C2C parameters are unfitted experiments, so cleaner
+          waveforms do not guarantee better recognition.
+        </p>
+      </details>
     </section>
   );
 }

@@ -50,6 +50,16 @@ def test_rest_mock_contract_and_validation():
         invalid_auto = rest_request(client, language_code="indic-auto", model="prisma-v2.5")
         assert invalid_auto.status_code == 422
 
+        unsupported_format = rest_request(client, model="prisma-v2.5", format="codemix")
+        assert unsupported_format.status_code == 400
+        assert unsupported_format.json()["error_code"] == "INVALID_FORMAT"
+
+        codemix = rest_request(client, model="prisma-v3.0", format="codemix")
+        assert codemix.status_code == 200
+
+        transliterate = rest_request(client, model="prisma-v3.0", format="transliterate")
+        assert transliterate.status_code == 200
+
         bad_audio = rest_request(client, b"not a decodable audio file")
         assert bad_audio.status_code == 400
 

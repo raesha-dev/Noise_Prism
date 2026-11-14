@@ -6,7 +6,20 @@
 import { z } from "zod";
 
 export type AccuracyMode = "fast" | "max";
-export const TRACK_IDS = ["C0", "C1", "C2", "C3"] as const;
+export type OutputFormat = "auto" | "verbatim" | "transcribe" | "codemix" | "transliterate";
+export type LanguageCode =
+  | "indic-auto"
+  | "hi-IN"
+  | "kn-IN"
+  | "en-IN"
+  | "ta-IN"
+  | "te-IN"
+  | "bn-IN"
+  | "gu-IN"
+  | "ml-IN"
+  | "mr-IN"
+  | "pa-IN";
+export const TRACK_IDS = ["C0", "C1", "C2", "C2B", "C2C", "C3"] as const;
 export type TrackId = (typeof TRACK_IDS)[number];
 
 export type CandidateResult = {
@@ -16,6 +29,9 @@ export type CandidateResult = {
   guardScore?: number | null | undefined;
   confidence?: number | null | undefined;
   snrDb?: number | null | undefined;
+  error?: string | null | undefined;
+  truncated?: boolean | undefined;
+  parameters?: Record<string, unknown> | null | undefined;
 };
 
 export type ProcessingResult = {
@@ -24,6 +40,10 @@ export type ProcessingResult = {
   scoreSuppressedReason?: string | null | undefined;
   selectedCandidate?: TrackId | undefined;
   transcription?: string | undefined;
+  outputFormat?: Exclude<OutputFormat, "auto"> | undefined;
+  languageCode?: LanguageCode | undefined;
+  detectedLanguageCode?: string | null | undefined;
+  unavailableCandidates?: Partial<Record<TrackId, string>> | undefined;
   candidates: Partial<Record<TrackId, CandidateResult>>;
   analysis: {
     snrDb?: number | undefined;
@@ -54,6 +74,11 @@ export type HealthInfo = {
   gnaniMode: GnaniMode;
   version: string;
 };
+export type CandidateConfig = {
+  fitted: boolean;
+  oaLambda: number;
+  oaSweep: number[];
+};
 
 export type EvaluationRow = {
   id: string;
@@ -62,8 +87,25 @@ export type EvaluationRow = {
   cer?: number | null | undefined;
   latencyMs?: number | null | undefined;
   candidate?: string | null | undefined;
+  failedRequests?: number | null | undefined;
+  emptyTranscripts?: number | null | undefined;
+  truncatedResponses?: number | null | undefined;
+  sourceType?: string | undefined;
+  sourceClipCount?: number | null | undefined;
+  underpowered?: boolean | undefined;
+  deltaWer?: number | null | undefined;
+  deltaCer?: number | null | undefined;
+  medianDeltaWer?: number | null | undefined;
+  werCi95Low?: number | null | undefined;
+  werCi95High?: number | null | undefined;
+  cerCi95Low?: number | null | undefined;
+  cerCi95High?: number | null | undefined;
+  candidateBBetter?: number | null | undefined;
+  tie?: number | null | undefined;
+  candidateABetter?: number | null | undefined;
+  apiCalls?: number | null | undefined;
 };
-export type EvaluationSection = "comparison" | "ablation" | "snr" | "noise";
+export type EvaluationSection = "comparison" | "ablation" | "snr" | "noise" | "source_type";
 export type EvaluationReport = {
   available: boolean;
   reason?: string | null | undefined;
@@ -77,7 +119,10 @@ export type ProcessOptions = {
   mode: AccuracyMode;
   candidates: TrackId[];
   asrModel: string;
+  outputFormat: OutputFormat;
+  languageCode: LanguageCode;
   compareModels: boolean;
+  oaLambda?: number | undefined;
   signal?: AbortSignal | undefined;
   timeoutMs?: number | undefined;
 };
@@ -188,6 +233,9 @@ const candidateSchema = z
     guard_score: nullableNum,
     confidence: nullableNum,
     snr_db: nullableNum,
+    error: nullableStr,
+    truncated: z.boolean(),
+    parameters: z.record(z.string(), z.unknown()).nullable(),
   })
   .strict()
   .transform((value) => ({
@@ -197,11 +245,15 @@ const candidateSchema = z
     guardScore: value.guard_score,
     confidence: value.confidence,
     snrDb: value.snr_db,
+    error: value.error,
+    truncated: value.truncated,
+    parameters: value.parameters,
   }));
 
 const analysisSchema = z
   .object({
-    snr_db: nullableNum,
+    stationary_snr_db_est: nullableNum.optional(),
+    snr_db: nullableNum.optional(),
     noise_floor_db: nullableNum,
     speech_energy_db: nullableNum,
     vad_segments: z.array(z.tuple([num, num])),
@@ -209,7 +261,18 @@ const analysisSchema = z
     guard_result: z.record(z.string(), z.unknown()).nullable(),
     spectrum: z.array(num),
   })
-  .strict();
+  .strict()
+  .refine(
+    (analysis) => analysis.stationary_snr_db_est !== undefined || analysis.snr_db !== undefined,
+    { path: ["stationary_snr_db_est"], message: "Expected the SNR estimate field." },
+  )
+  .transform((analysis) => ({
+    ...analysis,
+    stationary_snr_db_est:
+      analysis.stationary_snr_db_est !== undefined
+        ? analysis.stationary_snr_db_est
+        : (analysis.snr_db ?? null),
+  }));
 
 const serviceEvaluationSchema = z
   .object({
@@ -225,6 +288,22 @@ const resultSchema = z
   .object({
     request_id: z.string().min(1),
     gnani_mode: z.enum(["unconfigured", "live", "mock"]),
+    output_format: z.enum(["verbatim", "transcribe", "codemix", "transliterate"]),
+    language_code: z.enum([
+      "indic-auto",
+      "hi-IN",
+      "kn-IN",
+      "en-IN",
+      "ta-IN",
+      "te-IN",
+      "bn-IN",
+      "gu-IN",
+      "ml-IN",
+      "mr-IN",
+      "pa-IN",
+    ]),
+    detected_language_code: nullableStr,
+    unavailable_candidates: z.record(z.string(), z.string()),
     score_suppressed_reason: z.string().nullable(),
     selected_candidate: z.enum(TRACK_IDS),
     transcription: z.string(),
@@ -266,6 +345,7 @@ export function normalizeProcessingResult(raw: unknown, baseUrl = ""): Processin
   if (!parsed.success) throw responseShapeError("POST /process", parsed.error.issues);
   const body = parsed.data;
   const candidates: ProcessingResult["candidates"] = {};
+  const unavailableCandidates: NonNullable<ProcessingResult["unavailableCandidates"]> = {};
   for (const [key, value] of Object.entries(body.candidates)) {
     const id = asTrackId(key);
     if (!id) continue;
@@ -274,6 +354,10 @@ export function normalizeProcessingResult(raw: unknown, baseUrl = ""): Processin
       audioUrl: resolveServiceUrl(baseUrl, value.audioUrl ?? undefined),
     };
   }
+  for (const [key, reason] of Object.entries(body.unavailable_candidates)) {
+    const id = asTrackId(key);
+    if (id) unavailableCandidates[id] = reason;
+  }
   const selectedCandidate = asTrackId(body.selected_candidate);
   if (!selectedCandidate || (!body.transcription && Object.keys(candidates).length === 0)) {
     throw new Error("The audio service response had no transcript or candidates.");
@@ -281,6 +365,10 @@ export function normalizeProcessingResult(raw: unknown, baseUrl = ""): Processin
   return {
     requestId: body.request_id,
     gnaniMode: body.gnani_mode,
+    outputFormat: body.output_format,
+    languageCode: body.language_code,
+    detectedLanguageCode: body.detected_language_code,
+    unavailableCandidates,
     scoreSuppressedReason: body.score_suppressed_reason ?? undefined,
     selectedCandidate,
     transcription:
@@ -288,7 +376,7 @@ export function normalizeProcessingResult(raw: unknown, baseUrl = ""): Processin
       (selectedCandidate ? candidates[selectedCandidate]?.transcript : undefined),
     candidates,
     analysis: {
-      snrDb: body.analysis.snr_db ?? undefined,
+      snrDb: body.analysis.stationary_snr_db_est ?? undefined,
       noiseFloorDb: body.analysis.noise_floor_db ?? undefined,
       speechEnergyDb: body.analysis.speech_energy_db ?? undefined,
       guardScore: undefined,
@@ -323,7 +411,10 @@ export function buildProcessForm(
   form.append("sample_format", "pcm_s16le");
   form.append("asr_provider", "gnani_prisma");
   form.append("asr_model", options.asrModel);
+  form.append("language_code", options.languageCode);
+  if (options.outputFormat !== "auto") form.append("format", options.outputFormat);
   form.append("candidates", candidates.join(","));
+  form.append("oa_lambda", String(options.oaLambda ?? 0.1));
   form.append("selection", options.mode === "fast" ? "snr_router" : "consensus");
   form.append("compare_models", options.mode === "max" && options.compareModels ? "true" : "false");
   return form;
@@ -356,6 +447,69 @@ export async function checkApiConnection(baseUrl: string): Promise<HealthInfo> {
     };
   } catch (error) {
     throw describeFetchError(error, 8000);
+  } finally {
+    timeout.done();
+  }
+}
+
+/** Sends the complete transcript to the backend and returns Gnani's generated WAV. */
+export async function synthesizeTranscript(
+  baseUrl: string,
+  text: string,
+  signal?: AbortSignal,
+): Promise<Blob> {
+  const timeoutMs = 180_000;
+  const timeout = withTimeout(signal, timeoutMs);
+  try {
+    const response = await fetch(`${baseUrl}/api/tts`, {
+      method: "POST",
+      headers: { Accept: "audio/wav", "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+      signal: timeout.signal,
+    });
+    if (!response.ok) throw new Error(await readError(response));
+    const audio = await response.blob();
+    if (audio.size === 0 || !audio.type.toLowerCase().includes("wav")) {
+      throw new Error("The audio service returned an invalid speech-audio file.");
+    }
+    return audio;
+  } catch (error) {
+    throw describeFetchError(error, timeoutMs);
+  } finally {
+    timeout.done();
+  }
+}
+
+/** Loads the server-owned experimental coefficient grid and fitted-state flag. */
+export async function fetchCandidateConfig(baseUrl: string): Promise<CandidateConfig> {
+  const timeout = withTimeout(undefined, 8000);
+  try {
+    const response = await fetch(`${baseUrl}/api/config`, {
+      headers: { Accept: "application/json" },
+      signal: timeout.signal,
+    });
+    if (!response.ok) throw new Error(await readError(response));
+    const parsed = z
+      .object({
+        imcra_omlsa: z.object({
+          fitted: z.boolean(),
+          oa_lambda: z.number().finite().min(0).max(0.4),
+          oa_sweep: z.array(z.number().finite().min(0).max(0.4)).min(1),
+        }),
+      })
+      .safeParse(await response.json());
+    if (!parsed.success) throw responseShapeError("GET /api/config", parsed.error.issues);
+    const oaSweep = [...new Set(parsed.data.imcra_omlsa.oa_sweep)];
+    const oaLambda = oaSweep.includes(parsed.data.imcra_omlsa.oa_lambda)
+      ? parsed.data.imcra_omlsa.oa_lambda
+      : oaSweep[0];
+    if (oaLambda === undefined)
+      throw new Error("The audio service returned an empty OA coefficient grid.");
+    return {
+      fitted: parsed.data.imcra_omlsa.fitted,
+      oaLambda,
+      oaSweep,
+    };
   } finally {
     timeout.done();
   }
@@ -394,6 +548,23 @@ const rowSchema = z
     cer: nullableNum.optional(),
     latency_ms: nullableNum.optional(),
     candidate: z.string().nullable().optional(),
+    failed_requests: nullableNum.optional(),
+    empty_transcripts: nullableNum.optional(),
+    truncated_responses: nullableNum.optional(),
+    source_type: z.string().optional(),
+    n_source_clips: nullableNum.optional(),
+    underpowered: z.boolean().optional(),
+    delta_wer: nullableNum.optional(),
+    delta_cer: nullableNum.optional(),
+    median_delta_wer: nullableNum.optional(),
+    wer_ci95_low: nullableNum.optional(),
+    wer_ci95_high: nullableNum.optional(),
+    cer_ci95_low: nullableNum.optional(),
+    cer_ci95_high: nullableNum.optional(),
+    B_better: nullableNum.optional(),
+    tie: nullableNum.optional(),
+    A_better: nullableNum.optional(),
+    api_calls: nullableNum.optional(),
   })
   .strict()
   .transform((row) => ({
@@ -403,6 +574,23 @@ const rowSchema = z
     cer: row.cer,
     latencyMs: row.latency_ms,
     candidate: row.candidate,
+    failedRequests: row.failed_requests,
+    emptyTranscripts: row.empty_transcripts,
+    truncatedResponses: row.truncated_responses,
+    sourceType: row.source_type,
+    sourceClipCount: row.n_source_clips,
+    underpowered: row.underpowered,
+    deltaWer: row.delta_wer,
+    deltaCer: row.delta_cer,
+    medianDeltaWer: row.median_delta_wer,
+    werCi95Low: row.wer_ci95_low,
+    werCi95High: row.wer_ci95_high,
+    cerCi95Low: row.cer_ci95_low,
+    cerCi95High: row.cer_ci95_high,
+    candidateBBetter: row.B_better,
+    tie: row.tie,
+    candidateABetter: row.A_better,
+    apiCalls: row.api_calls,
   }));
 
 const reportSectionsSchema = z
@@ -411,6 +599,7 @@ const reportSectionsSchema = z
     ablation: z.array(rowSchema).optional(),
     snr: z.array(rowSchema).optional(),
     noise: z.array(rowSchema).optional(),
+    source_type: z.array(rowSchema).optional(),
   })
   .strict();
 
@@ -438,6 +627,7 @@ const evaluationResponseSchema = z
         ablation: z.array(rowSchema),
         snr: z.array(rowSchema),
         noise: z.array(rowSchema),
+        source_type: z.array(rowSchema),
       })
       .strict(),
   })

@@ -35,7 +35,7 @@ from fastapi import (Depends, FastAPI, File, Form, Header, Query, Request, Uploa
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from websockets.asyncio.client import connect as ws_connect
@@ -60,6 +60,7 @@ LANGUAGES = {
     "mr-IN": "Marathi", "pa-IN": "Punjabi",
 }
 MODELS = ("v2.5", "v3.0")
+DEFAULT_CANDIDATES = ("C0", "C1", "C2")
 MODES = {
     "raw": "Send the original audio to Prisma (the baseline)",
     "fast": "Route to one version by estimated SNR, guard it, one API call",
@@ -104,7 +105,7 @@ class Settings:
         load_environment()
         e = os.environ.get
         s = cls()
-        data_dir = Path(e("BN_DATA_DIR", str(ROOT))).expanduser().resolve()
+        data_dir = Path(e("BN_DATA_DIR") or str(ROOT)).expanduser().resolve()
         s.workdir = data_dir / "workdir"
         s.results_dir = data_dir / "results"
         if e("BN_CORS_ORIGINS"):
@@ -151,8 +152,14 @@ class JobRequest(BaseModel):
     mode: Literal["raw", "fast", "accuracy", "compare_all"] = "fast"
     language: str = "hi-IN"
     model: Literal["v2.5", "v3.0"] = "v2.5"
+    format: Optional[Literal["verbatim", "transcribe", "codemix", "transliterate"]] = "verbatim"
     reference: Optional[str] = None
     candidate_ids: Optional[list[str]] = None
+    oa_lambda: float = 0.1
+
+
+class TextToSpeechRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=10000)
 
 
 class ScoreRequest(BaseModel):
@@ -181,10 +188,13 @@ class LegacyCandidateResponse(BaseModel):
     guard_score: float | None = None
     confidence: float | None = None
     snr_db: float | None = None
+    error: str | None = None
+    truncated: bool = False
+    parameters: dict[str, Any] | None = None
 
 
 class LegacyAnalysisResponse(BaseModel):
-    snr_db: float | None = None
+    stationary_snr_db_est: float | None = None
     noise_floor_db: float | None = None
     speech_energy_db: float | None = None
     vad_segments: list[tuple[float, float]]
@@ -204,7 +214,11 @@ class LegacyEvaluationResponse(BaseModel):
 class LegacyProcessResponse(BaseModel):
     request_id: str
     gnani_mode: Literal["unconfigured", "live", "mock"]
-    selected_candidate: Literal["C0", "C1", "C2", "C3"]
+    output_format: Literal["verbatim", "transcribe", "codemix", "transliterate"]
+    language_code: str
+    detected_language_code: str | None = None
+    unavailable_candidates: dict[str, str]
+    selected_candidate: Literal["C0", "C1", "C2", "C2B", "C2C", "C3"]
     transcription: str
     candidates: dict[str, LegacyCandidateResponse]
     analysis: LegacyAnalysisResponse
@@ -223,6 +237,23 @@ class LegacyEvaluationRow(BaseModel):
     cer: float | None = None
     latency_ms: float | None = None
     candidate: str | None = None
+    failed_requests: int | None = None
+    empty_transcripts: int | None = None
+    truncated_responses: int | None = None
+    source_type: str | None = None
+    n_source_clips: int | None = None
+    underpowered: bool | None = None
+    delta_wer: float | None = None
+    delta_cer: float | None = None
+    median_delta_wer: float | None = None
+    wer_ci95_low: float | None = None
+    wer_ci95_high: float | None = None
+    cer_ci95_low: float | None = None
+    cer_ci95_high: float | None = None
+    B_better: int | None = None
+    tie: int | None = None
+    A_better: int | None = None
+    api_calls: int | None = None
 
 
 class LegacyEvaluationResponseModel(BaseModel):
@@ -278,6 +309,23 @@ def validate_language(language: str, model: str) -> None:
         raise ApiError(422, "BAD_LANGUAGE", f"Unsupported language_code. Use one of {sorted(LANGUAGES)}.")
 
 
+def validate_output_format(output_format: Optional[str], model: str) -> None:
+    if output_format is None:
+        return
+    if output_format not in {"verbatim", "transcribe", "codemix", "transliterate"}:
+        raise ApiError(422, "BAD_FORMAT", "format must be verbatim, transcribe, codemix, or transliterate.")
+    if output_format in {"codemix", "transliterate"} and model != "v3.0":
+        raise ApiError(422, "BAD_FORMAT", f"format={output_format} requires Prisma v3.0.")
+
+
+def effective_output_format(output_format: Optional[str], model: str, language: str) -> str:
+    if output_format is not None:
+        return output_format
+    if model == "v3.0" and language in {"hi-IN", "en-IN"}:
+        return "transcribe"
+    return "verbatim"
+
+
 def score_text(reference: Optional[str], text: str) -> Optional[dict]:
     if not reference or not normalize(reference):
         return None
@@ -295,11 +343,14 @@ def create_app(settings: Optional[Settings] = None,
     cfg = settings or Settings.from_env()
     router_path = cfg.config_dir / "router.json"
     suppress_path = cfg.config_dir / "suppress.json"
+    imcra_path = cfg.config_dir / "imcra_omlsa.json"
     router_cfg = pl.load_router_config(router_path) if router_path.exists() else {
         "fitted": False, "rules": [], "fallback_chain": ["C2", "C1", "C0"],
         "guard": {"max_lsd_db": 6.0, "max_speech_energy_change_db": 12.0}}
     suppress_cfg = json.loads(suppress_path.read_text(encoding="utf-8")) if suppress_path.exists() else pl.SUPPRESS_CONFIG
     suppress_cfg.setdefault("fitted", False)
+    imcra_cfg = json.loads(imcra_path.read_text(encoding="utf-8")) if imcra_path.exists() else pl.IMCRA_CONFIG
+    imcra_cfg.setdefault("fitted", False)
 
     clips: dict[str, Clip] = {}
     jobs: dict[str, Job] = {}
@@ -324,7 +375,7 @@ def create_app(settings: Optional[Settings] = None,
             budget["day"], budget["used"] = today, 0
         if budget["used"] + n > cfg.daily_call_cap:
             raise ApiError(429, "DEMO_BUDGET_EXHAUSTED",
-                           "The demo has used its daily Prisma budget. Try again tomorrow or use the saved results.")
+                           "The demo has used its daily Gnani request budget. Try again tomorrow or use saved results.")
         budget["used"] += n
 
     def require_token(x_demo_token: Optional[str] = Header(None)) -> None:
@@ -337,14 +388,18 @@ def create_app(settings: Optional[Settings] = None,
             raise ApiError(404, "CLIP_NOT_FOUND", "Unknown or expired clip. Upload it again.")
         return clip
 
-    def ensure_variant(clip: Clip, vid: str) -> Path:
+    def ensure_variant(clip: Clip, vid: str, oa_lambda: float | None = None) -> Path:
         if vid not in pl.CANDIDATES:
             reason = pl.UNAVAILABLE_REASONS.get(vid, "The requested candidate is not available.")
             raise ApiError(404, "UNKNOWN_VARIANT", f"Variant {vid} is not available. {reason}")
         path = clip.dir / f"{vid}.wav"
-        if vid not in clip.variants:
+        cached_lambda = clip.candidate_meta.get(vid, {}).get("observation_addition_lambda")
+        requested_lambda = float(imcra_cfg["oa_lambda"] if oa_lambda is None else oa_lambda)
+        if vid not in clip.variants or (vid == "C2C" and cached_lambda != requested_lambda):
             t0 = time.perf_counter()
-            arr, meta = pl.apply_candidate(vid, clip.audio, suppress_cfg)
+            arr, meta = pl.apply_candidate(
+                vid, clip.audio, suppress_cfg, imcra_cfg, requested_lambda
+            )
             clip.enhance_ms[vid] = round(1000 * (time.perf_counter() - t0), 1)
             clip.candidate_meta[vid] = meta
             clip.variants[vid] = arr
@@ -381,30 +436,46 @@ def create_app(settings: Optional[Settings] = None,
         return variant, decision
 
     async def transcribe_one(job: Job, clip: Clip, variant: str, model: str) -> dict:
-        path = ensure_variant(clip, variant)
+        path = ensure_variant(clip, variant, job.params.oa_lambda)
         job.steps.append({"t": round(time.time() - job.created, 2), "msg": f"transcribing {variant} on Prisma {model}"})
         t: Transcript = await asyncio.to_thread(
-            get_client().transcribe, path, job.params.language, model=model, fmt="verbatim", run_id=job.id)
+            get_client().transcribe, path, job.params.language, model=model,
+            fmt=job.params.format, run_id=job.id)
         note = t.note
         if variant == "C2" and not suppress_cfg.get("fitted", False):
             note = "; ".join(part for part in (note, "C2 suppression parameters are placeholders, not fitted.") if part)
+        if variant in {"C2B", "C2C"} and not imcra_cfg.get("fitted", False):
+            note = "; ".join(
+                part for part in (
+                    note,
+                    "Simplified adaptive spectral parameters are experimental and unfitted; paper fidelity is unverified.",
+                ) if part
+            )
         mode = get_gnani_mode()
         model_name = f"mock-prisma-{model}" if mode == "mock" else model
         if mode == "mock":
             note = "; ".join(part for part in (note, "MOCK GNANI: this transcript is a placeholder, not Prisma output.") if part)
+        candidate_parameters = clip.candidate_meta.get(variant)
+        fitted = (
+            candidate_parameters.get("parameters_fitted")
+            if candidate_parameters is not None
+            else None
+        )
         return {"key": f"{variant}@{model_name}", "variant": variant, "model": model_name, "text": t.text, "ok": t.ok,
                 "error": t.error, "note": note, "cached": t.cached, "api_latency_s": t.end_to_end_latency,
                 "wall_s": t.wall_seconds, "detected_language_code": t.detected_language_code,
+                "truncated": t.truncated,
+                "parameters": candidate_parameters,
                 "score": score_text(job.params.reference or clip.reference, t.text) if t.ok and mode == "live" else None,
                 "score_suppressed_reason": "mock" if mode == "mock" else None,
-                "parameters_fitted": suppress_cfg.get("fitted", False) if variant == "C2" else None}
+                "parameters_fitted": fitted}
 
     async def run_job(job: Job) -> None:
         p = job.params
         job.status = "running"
         clip = get_clip(p.clip_id)
         t_start = time.perf_counter()
-        available = [v for v in (p.candidate_ids or list(pl.CANDIDATES)) if v in pl.CANDIDATES]
+        available = [v for v in (p.candidate_ids or DEFAULT_CANDIDATES) if v in pl.CANDIDATES]
         if "C0" not in available:
             available.insert(0, "C0")
         other = "v3.0" if p.model == "v2.5" else "v2.5"
@@ -425,18 +496,35 @@ def create_app(settings: Optional[Settings] = None,
         ok = [h for h in hyps if h["ok"]]
         if not ok:
             raise ApiError(502, "ASR_FAILED", "; ".join(h["error"] for h in hyps if h["error"]) or "No transcript returned.")
+        usable = [h for h in ok if h["text"].strip()]
 
         if p.mode == "accuracy":
-            if len(ok) < 3:
-                raise ApiError(502, "NOT_ENOUGH_HYPOTHESES", "Accuracy mode needs at least three successful transcripts.")
-            picked = pl.consensus_pick({h["key"]: h["text"] for h in ok}, [h["key"] for h in ok])
-            chosen = next(h for h in ok if h["key"] == picked["chosen"])
-            decision = {"method": "minimum-Bayes-risk consensus over word edit distance",
-                        "chosen": picked["chosen"], "total_distance": picked["total_distance"],
-                        "pairwise_distance": picked["pairwise_distance"],
-                        "tie_break": "earliest candidate, i.e. the original audio on the requested model"}
+            if usable:
+                picked = pl.consensus_pick({h["key"]: h["text"] for h in usable}, [h["key"] for h in usable])
+                chosen = next(h for h in usable if h["key"] == picked["chosen"])
+                decision = {"method": "minimum-Bayes-risk consensus over non-empty transcripts",
+                            "chosen": picked["chosen"], "total_distance": picked["total_distance"],
+                            "pairwise_distance": picked["pairwise_distance"],
+                            "hypotheses_used": len(usable),
+                            "tie_break": "earliest usable candidate, with the original audio first"}
+            else:
+                chosen = next(
+                    (h for h in ok if h["variant"] == "C0" and h["model"].endswith(p.model)),
+                    ok[0],
+                )
+                decision = {
+                    "method": "no non-empty transcript was available for consensus",
+                    "chosen": chosen["key"],
+                    "hypotheses_used": 0,
+                }
         else:
-            chosen = next((h for h in ok if h["variant"] == routed and h["model"] == p.model), ok[0])
+            chosen = next(
+                (h for h in usable if h["variant"] == routed and h["model"] == p.model),
+                usable[0] if usable else next(
+                    (h for h in ok if h["variant"] == routed and h["model"] == p.model),
+                    ok[0],
+                ),
+            )
 
         job.result = clean({
             "mode": p.mode, "language": p.language,
@@ -546,12 +634,25 @@ def create_app(settings: Optional[Settings] = None,
         today = date.today().isoformat()
         used = budget["used"] if budget["day"] == today else 0
         candidates = [
-            {"id": candidate.id, "label": candidate.label, "available": True, "reason": None}
+            {
+                "id": candidate.id,
+                "label": candidate.label,
+                "available": True,
+                "reason": None,
+                "experimental": candidate.id in {"C2B", "C2C"},
+                "fitted": (
+                    bool(imcra_cfg.get("fitted", False))
+                    if candidate.id in {"C2B", "C2C"}
+                    else bool(suppress_cfg.get("fitted", False)) if candidate.id == "C2"
+                    else None
+                ),
+            }
             for candidate in pl.CANDIDATES.values()
         ]
         if not neural_available:
             candidates.append({"id": "C3", "label": pl.PLANNED["C3"], "available": False,
-                              "reason": neural_reason or pl.UNAVAILABLE_REASONS.get("C3")})
+                              "reason": neural_reason or pl.UNAVAILABLE_REASONS.get("C3"),
+                              "experimental": False, "fitted": None})
         return {
             "gnani_mode": get_gnani_mode(),
             "languages": [{"code": c, "name": n} for c, n in LANGUAGES.items()],
@@ -561,6 +662,14 @@ def create_app(settings: Optional[Settings] = None,
             "limits": {"max_seconds": pl.MAX_SECONDS, "max_upload_mb": cfg.max_upload_mb, "sample_rate": pl.SR},
             "router": {"fitted": bool(router_cfg["fitted"])},
             "suppression": {"fitted": bool(suppress_cfg.get("fitted", False))},
+            "imcra_omlsa": {
+                "fitted": bool(imcra_cfg.get("fitted", False)),
+                "oa_lambda": float(imcra_cfg["oa_lambda"]),
+                "oa_sweep": list(imcra_cfg["oa_sweep"]),
+                "gain_floor": float(imcra_cfg["gain_floor"]),
+                "gain_smoothing": float(imcra_cfg["gain_smoothing"]),
+                "noise_estimator": "Simplified adaptive spectral tracking; paper fidelity unverified",
+            },
             "optional_features": {
                 "silero_vad": {"available": silero_available, "reason": silero_reason,
                                "install_hint": "python -m pip install silero-vad"},
@@ -573,6 +682,37 @@ def create_app(settings: Optional[Settings] = None,
             "budget": {"daily_cap": cfg.daily_call_cap, "remaining": max(0, cfg.daily_call_cap - used)},
             "remaining_daily_budget": max(0, cfg.daily_call_cap - used),
         }
+
+    @app.post("/api/tts", dependencies=[Depends(require_token)])
+    async def synthesize_transcript(request: TextToSpeechRequest):
+        """Generate multilingual transcript speech via Gnani without exposing credentials."""
+        text = request.text.strip()
+        if not text:
+            raise ApiError(422, "EMPTY_TEXT", "Provide a non-empty transcript to read.")
+        if get_gnani_mode() != "live":
+            raise ApiError(503, "TTS_UNAVAILABLE", "Gnani text-to-speech requires a live Gnani connection.")
+        client = get_client()
+        synthesize = getattr(client, "synthesize", None)
+        if not callable(synthesize):
+            raise ApiError(503, "TTS_UNAVAILABLE", "Gnani text-to-speech is not available in this server mode.")
+        reserve_calls(1)
+        try:
+            audio, media_type = await asyncio.to_thread(synthesize, text, language="auto")
+        except FatalAPIError:
+            raise ApiError(502, "GNANI_TTS_ACCESS_DENIED", "Gnani rejected the text-to-speech request.")
+        except Exception as exc:
+            message = str(exc)
+            if message.startswith("GNANI_TTS_"):
+                raise ApiError(502, "GNANI_TTS_FAILED", message)
+            raise ApiError(502, "GNANI_TTS_FAILED",
+                           f"The Gnani text-to-speech request failed ({type(exc).__name__}).")
+        if not audio:
+            raise ApiError(502, "GNANI_TTS_EMPTY_AUDIO", "Gnani returned empty speech audio.")
+        return Response(
+            content=audio,
+            media_type=media_type,
+            headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+        )
 
     @app.get("/api/samples")
     def samples():
@@ -630,14 +770,14 @@ def create_app(settings: Optional[Settings] = None,
         ensure_variant(clip, "C0")
         clips[clip_id] = clip
         return {"clip_id": clip_id, "source": source, "language": language, "analysis": analysis,
-                "variants": list(pl.CANDIDATES), "expires_in_minutes": cfg.ttl_minutes}
+                "variants": list(DEFAULT_CANDIDATES), "expires_in_minutes": cfg.ttl_minutes}
 
     @app.get("/api/clips/{clip_id}")
     def clip_info(clip_id: str):
         """Metadata and analysis (estimated SNR, speech segments, clipping) for an uploaded clip."""
         c = get_clip(clip_id)
         return {"clip_id": c.id, "source": c.source, "language": c.language, "reference": c.reference,
-                "analysis": c.analysis, "variants": list(pl.CANDIDATES), "enhance_ms": c.enhance_ms,
+                "analysis": c.analysis, "variants": list(DEFAULT_CANDIDATES), "enhance_ms": c.enhance_ms,
                 "candidate_parameters": c.candidate_meta}
 
     @app.get("/api/clips/{clip_id}/audio")
@@ -645,7 +785,9 @@ def create_app(settings: Optional[Settings] = None,
         """WAV for playback: the original (C0) or a processed version."""
         c = get_clip(clip_id)
         path = ensure_variant(c, variant)
-        headers = {"X-BN-Suppression-Fitted": str(bool(suppress_cfg.get("fitted", False))).lower()} if variant == "C2" else {}
+        candidate_meta = c.candidate_meta.get(variant, {})
+        fitted = candidate_meta.get("parameters_fitted")
+        headers = {"X-BN-Parameters-Fitted": str(bool(fitted)).lower()} if fitted is not None else {}
         return FileResponse(path, media_type="audio/wav", headers=headers)
 
     @app.get("/api/clips/{clip_id}/spectrogram.png")
@@ -671,6 +813,9 @@ def create_app(settings: Optional[Settings] = None,
         pl.initialize_neural()
         get_clip(req.clip_id)
         validate_language(req.language, req.model)
+        validate_output_format(req.format, req.model)
+        if not 0 <= req.oa_lambda <= 0.4:
+            raise ApiError(422, "BAD_OA_LAMBDA", "oa_lambda must be between 0 and 0.4.")
         if req.mode == "accuracy" and req.language == "indic-auto":
             raise ApiError(422, "BAD_LANGUAGE", "Accuracy mode needs a specific language (it also calls Prisma v2.5).")
         requested = req.candidate_ids or list(pl.CANDIDATES)
@@ -695,9 +840,12 @@ def create_app(settings: Optional[Settings] = None,
         sample_format: str = Form("pcm_s16le"),
         asr_provider: str = Form("gnani_prisma"),
         asr_model: str = Form("prisma-v2.5"),
+        language_code: str = Form("hi-IN"),
+        format: str = Form("auto"),
         candidates: str = Form("C0,C1,C2"),
         selection: str = Form("snr_router"),
         compare_models: bool = Form(False),
+        oa_lambda: float = Form(0.1),
         reference: Optional[str] = Form(None),
     ):
         """Process one upload using the browser workstation's multipart wire contract."""
@@ -710,12 +858,21 @@ def create_app(settings: Optional[Settings] = None,
         if selection not in {"snr_router", "consensus"}:
             raise ApiError(422, "BAD_SELECTION", "selection must be snr_router or consensus.")
         model = _normalise_model(asr_model)
+        output_format = None if format == "auto" else format
+        validate_language(language_code, model)
+        validate_output_format(output_format, model)
+        if compare_models and language_code == "indic-auto":
+            raise ApiError(422, "BAD_LANGUAGE", "Automatic language detection cannot compare Prisma v2.5; turn off Compare Prisma models.")
         requested = [part.strip().upper() for part in candidates.split(",") if part.strip()]
-        invalid = set(requested) - {"C0", "C1", "C2", "C3"}
+        invalid = set(requested) - (set(pl.CANDIDATES) | {"C3"})
         if invalid:
             raise ApiError(422, "UNKNOWN_VARIANT", f"Unknown candidate(s): {', '.join(sorted(invalid))}.")
         requested = list(dict.fromkeys(requested))
         pl.initialize_neural()
+        unavailable_candidates = {
+            candidate: pl.UNAVAILABLE_REASONS.get(candidate, f"{candidate} is unavailable on this backend.")
+            for candidate in requested if candidate not in pl.CANDIDATES
+        }
         usable = [candidate for candidate in requested if candidate in pl.CANDIDATES]
         if "C0" not in usable:
             usable.insert(0, "C0")
@@ -723,11 +880,14 @@ def create_app(settings: Optional[Settings] = None,
             raise ApiError(422, "BAD_SELECTION", "fast mode requires snr_router selection.")
         if mode == "max" and selection != "consensus":
             raise ApiError(422, "BAD_SELECTION", "max mode requires consensus selection.")
+        if not 0 <= oa_lambda <= 0.4:
+            raise ApiError(422, "BAD_OA_LAMBDA", "oa_lambda must be between 0 and 0.4.")
 
         created = await create_clip(file=file, sample_id=None, language=None, reference=reference)
         job_mode = "fast" if mode == "fast" else ("accuracy" if compare_models else "compare_all")
         request = JobRequest(
-            clip_id=created["clip_id"], mode=job_mode, language="hi-IN", model=model,
+            clip_id=created["clip_id"], mode=job_mode, language=language_code, model=model,
+            format=output_format, oa_lambda=oa_lambda,
             reference=reference, candidate_ids=usable,
         )
         queued = await create_job(request)
@@ -742,20 +902,34 @@ def create_app(settings: Optional[Settings] = None,
         result = job.result
         requested_model_name = f"mock-prisma-{model}" if result["gnani_mode"] == "mock" else model
         requested_hypotheses = [
-            hyp for hyp in result["hypotheses"] if hyp["model"] == requested_model_name and hyp["ok"]
+            hyp for hyp in result["hypotheses"] if hyp["model"] == requested_model_name
         ]
         if mode == "max" and not compare_models:
-            if len(requested_hypotheses) < 3:
-                raise ApiError(502, "NOT_ENOUGH_HYPOTHESES", "Consensus needs at least three successful candidate transcripts.")
-            consensus = pl.consensus_pick(
-                {hyp["key"]: hyp["text"] for hyp in requested_hypotheses},
-                [hyp["key"] for hyp in requested_hypotheses],
-            )
-            chosen = next(hyp for hyp in requested_hypotheses if hyp["key"] == consensus["chosen"])
+            usable_hypotheses = [
+                hyp for hyp in requested_hypotheses if hyp["ok"] and hyp["text"].strip()
+            ]
+            if usable_hypotheses:
+                consensus = pl.consensus_pick(
+                    {hyp["key"]: hyp["text"] for hyp in usable_hypotheses},
+                    [hyp["key"] for hyp in usable_hypotheses],
+                )
+                chosen = next(hyp for hyp in usable_hypotheses if hyp["key"] == consensus["chosen"])
+            else:
+                chosen = next(
+                    (hyp for hyp in requested_hypotheses if hyp["variant"] == "C0"),
+                    requested_hypotheses[0],
+                )
         else:
             chosen = next(
-                (hyp for hyp in requested_hypotheses if hyp["variant"] == result["chosen"]["variant"]),
-                requested_hypotheses[0] if requested_hypotheses else result["hypotheses"][0],
+                (hyp for hyp in requested_hypotheses
+                 if hyp["variant"] == result["chosen"]["variant"] and hyp["ok"] and hyp["text"].strip()),
+                next(
+                    (hyp for hyp in requested_hypotheses if hyp["ok"] and hyp["text"].strip()),
+                    next(
+                        (hyp for hyp in requested_hypotheses if hyp["variant"] == "C0"),
+                        requested_hypotheses[0] if requested_hypotheses else result["hypotheses"][0],
+                    ),
+                ),
             )
 
         clip = get_clip(created["clip_id"])
@@ -772,6 +946,9 @@ def create_app(settings: Optional[Settings] = None,
                 "transcript": hyp["text"],
                 "audio_url": f"/api/clips/{clip.id}/audio?variant={candidate}",
                 "peaks": peaks,
+                "error": hyp["error"],
+                "truncated": hyp["truncated"],
+                "parameters": clip.candidate_meta.get(candidate),
             }
         selected_guard = (
             pl.guard(clip.audio, clip.variants[chosen["variant"]],
@@ -781,7 +958,7 @@ def create_app(settings: Optional[Settings] = None,
             "failed" if selected_guard.get("passed") is False else "not measured"
         )
         analysis = {
-            **({"snr_db": clip.analysis["snr_db_est"]} if clip.analysis["snr_db_est"] is not None else {}),
+            "stationary_snr_db_est": clip.analysis["stationary_snr_db_est"],
             "noise_floor_db": clip.analysis["noise_floor_db"],
             **({"speech_energy_db": clip.analysis["speech_energy_db"]} if clip.analysis["speech_energy_db"] is not None else {}),
             "vad_segments": clip.analysis["segments"],
@@ -793,6 +970,10 @@ def create_app(settings: Optional[Settings] = None,
         response = {
             "request_id": job.id,
             "gnani_mode": result["gnani_mode"],
+            "output_format": effective_output_format(output_format, model, language_code),
+            "language_code": language_code,
+            "detected_language_code": chosen.get("detected_language_code"),
+            "unavailable_candidates": unavailable_candidates,
             "selected_candidate": chosen["variant"],
             "transcription": chosen["text"],
             "candidates": candidate_results,
@@ -854,20 +1035,25 @@ def create_app(settings: Optional[Settings] = None,
         """Return aggregate CSVs as rows; never synthesize tables when benchmarks are absent."""
         names = {
             "final": "final_results.csv", "by_noise": "by_noise.csv", "by_snr": "by_snr.csv",
-            "by_language": "by_language.csv", "ablation": "ablation_results.csv", "latency": "latency.csv",
+            "by_language": "by_language.csv", "by_source_type": "by_source_type.csv",
+            "ablation": "ablation_results.csv", "latency": "latency.csv",
         }
-        missing = [filename for filename in names.values() if not (cfg.results_dir / filename).is_file()]
+        required_names = [filename for key, filename in names.items() if key != "by_source_type"]
+        missing = [filename for filename in required_names if not (cfg.results_dir / filename).is_file()]
         if missing:
             raise ApiError(404, "AGGREGATES_NOT_FOUND",
                            f"Aggregate results have not been generated yet: {', '.join(missing)}.")
         tables = {}
         for key, filename in names.items():
+            if not (cfg.results_dir / filename).is_file():
+                tables[key] = []
+                continue
             with (cfg.results_dir / filename).open(newline="", encoding="utf-8") as handle:
                 tables[key] = list(csv.DictReader(handle))
         return tables
 
     @app.get("/api/results/compare")
-    def results_compare(a: str, b: str, by: Optional[Literal["group", "language"]] = None,
+    def results_compare(a: str, b: str, by: Optional[Literal["group", "language", "source_type"]] = None,
                         n_boot: int = Query(2000, ge=200, le=5000)):
         """Paired comparison of two results files: WER/CER, bootstrap 95% CI, win/tie/loss. Delta is B minus A."""
         pairs, info = cmp.paired_rows(cmp.load(results_file(a)), cmp.load(results_file(b)))
@@ -892,7 +1078,7 @@ def create_app(settings: Optional[Settings] = None,
                 "dataset": None,
                 "clip_count": None,
                 "measured_at": None,
-                "sections": {"comparison": [], "ablation": [], "snr": [], "noise": []},
+                "sections": {"comparison": [], "ablation": [], "snr": [], "noise": [], "source_type": []},
             }
 
         def ui_rows(path: Path, default_pipeline: str) -> list[dict]:
@@ -908,23 +1094,53 @@ def create_app(settings: Optional[Settings] = None,
                     "candidate": row.get("candidate"),
                     **({"wer": _csv_number(row["wer"])} if _csv_number(row.get("wer")) is not None else {}),
                     **({"cer": _csv_number(row["cer"])} if _csv_number(row.get("cer")) is not None else {}),
-                    **({"latency_ms": _csv_number(row["latency_ms"])} if _csv_number(row.get("latency_ms")) is not None else {}),
+                    **({"latency_ms": _csv_number(row.get("latency_ms") or row.get("latency_p50_ms"))}
+                       if _csv_number(row.get("latency_ms") or row.get("latency_p50_ms")) is not None else {}),
+                    **({"failed_requests": int(row["failed_requests"])} if row.get("failed_requests", "").isdigit() else {}),
+                    **({"empty_transcripts": int(row["empty_transcripts"])} if row.get("empty_transcripts", "").isdigit() else {}),
+                    **({"truncated_responses": int(row["truncated_responses"])} if row.get("truncated_responses", "").isdigit() else {}),
+                    **({"source_type": row["source_type"]} if row.get("source_type") else {}),
+                    **({"n_source_clips": int(row["n_source_clips"])} if row.get("n_source_clips", "").isdigit() else {}),
+                    **({"underpowered": row["underpowered"].lower() == "true"} if row.get("underpowered") else {}),
+                    **{
+                        key: _csv_number(row[key])
+                        for key in (
+                            "delta_wer", "delta_cer", "median_delta_wer",
+                            "wer_ci95_low", "wer_ci95_high", "cer_ci95_low", "cer_ci95_high",
+                        )
+                        if _csv_number(row.get(key)) is not None
+                    },
+                    **{
+                        key: int(row[key])
+                        for key in ("B_better", "tie", "A_better", "api_calls")
+                        if row.get(key, "").isdigit()
+                    },
                 })
             return formatted
 
         final_rows = ui_rows(final_path, "Measured benchmark")
         measured_at = time.strftime("%Y-%m-%d", time.gmtime(final_path.stat().st_mtime))
+        with final_path.open(newline="", encoding="utf-8") as handle:
+            final_metrics = list(csv.DictReader(handle))
+            final_clips = [
+                int(value) for row in final_metrics
+                if (value := row.get("clips", "")).isdigit()
+            ]
         return {
             "available": True,
             "reason": None,
-            "clip_count": len(final_rows),
-            "dataset": None,
+            "clip_count": max(final_clips, default=0),
+            "dataset": next(
+                (row.get("split") for row in final_metrics if row.get("split")),
+                None,
+            ),
             "measured_at": measured_at,
             "sections": {
                 "comparison": final_rows,
                 "ablation": ui_rows(cfg.results_dir / "ablation_results.csv", "Measured ablation"),
                 "snr": ui_rows(cfg.results_dir / "by_snr.csv", "Measured SNR group"),
                 "noise": ui_rows(cfg.results_dir / "by_noise.csv", "Measured noise group"),
+                "source_type": ui_rows(cfg.results_dir / "by_source_type.csv", "Measured source type"),
             },
         }
 
@@ -934,6 +1150,15 @@ def create_app(settings: Optional[Settings] = None,
         with results_file(tag).open(newline="", encoding="utf-8") as f:
             rows = [r for r in csv.DictReader(f) if group is None or r.get("group") == group]
         return rows[:limit]
+
+    @app.get("/api/results/{tag}/export")
+    def results_export(tag: str, format: Literal["csv", "json"] = "json"):
+        """Export a measured results file without allowing paths outside results_dir."""
+        path = results_file(tag)
+        if format == "csv":
+            return FileResponse(path, media_type="text/csv", filename=path.name)
+        with path.open(newline="", encoding="utf-8-sig") as handle:
+            return list(csv.DictReader(handle))
 
     # ------------------------------------------------------------------ live
     @app.websocket("/live")

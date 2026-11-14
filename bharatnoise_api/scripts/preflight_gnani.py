@@ -30,6 +30,33 @@ class PreflightFailure(RuntimeError):
     """A documented endpoint check did not pass."""
 
 
+def _validate_rest_body(body: object, model: str, mode: str) -> None:
+    """Validate common REST fields without requiring model-dependent optional fields."""
+    if not isinstance(body, dict):
+        raise PreflightFailure(f"REST {model}: response JSON was not an object.")
+    fields = (
+        "success",
+        "request_id",
+        "transcript",
+        "model",
+        "processing_time",
+        "end_to_end_latency",
+    )
+    missing = [field for field in fields if field not in body]
+    if missing:
+        raise PreflightFailure(f"REST {model}: missing documented fields {', '.join(missing)}.")
+    expected_model = f"mock-{model}" if mode == "mock" else model
+    if body["success"] is not True or body["model"] != expected_model:
+        raise PreflightFailure(f"REST {model}: unsuccessful response or model echo mismatch.")
+    if not isinstance(body["transcript"], str):
+        raise PreflightFailure(f"REST {model}: transcript has an invalid type.")
+    if "detected_language_code" in body and body["detected_language_code"] is not None:
+        if not isinstance(body["detected_language_code"], str):
+            raise PreflightFailure(f"REST {model}: detected_language_code has an invalid type.")
+    if "truncated" in body and not isinstance(body["truncated"], bool):
+        raise PreflightFailure(f"REST {model}: truncated has an invalid type.")
+
+
 def _silence_wav() -> bytes:
     stream = io.BytesIO()
     sf.write(stream, np.zeros(16_000, dtype=np.float32), 8000, format="WAV", subtype="PCM_16")
@@ -38,8 +65,6 @@ def _silence_wav() -> bytes:
 
 def _rest_check(api_key: str, mode: str, record_audio: Callable[[float], None]) -> None:
     payload = _silence_wav()
-    fields = ("success", "request_id", "transcript", "model", "detected_language_code",
-              "processing_time", "end_to_end_latency", "truncated")
     for model in ("prisma-v2.5", "prisma-v3.0"):
         started = time.monotonic()
         record_audio(2.0)
@@ -63,14 +88,7 @@ def _rest_check(api_key: str, mode: str, record_audio: Callable[[float], None]) 
             body = response.json()
         except ValueError:
             raise PreflightFailure(f"REST {model}: response was not JSON.") from None
-        missing = [field for field in fields if field not in body]
-        if missing:
-            raise PreflightFailure(f"REST {model}: missing documented fields {', '.join(missing)}.")
-        expected_model = f"mock-{model}" if mode == "mock" else model
-        if body["success"] is not True or body["model"] != expected_model:
-            raise PreflightFailure(f"REST {model}: unsuccessful response or model echo mismatch.")
-        if not isinstance(body["transcript"], str) or not isinstance(body["truncated"], bool):
-            raise PreflightFailure(f"REST {model}: transcript or truncated has an invalid type.")
+        _validate_rest_body(body, model, mode)
         print(f"REST {model}: HTTP 200, model echo verified, latency {latency:.3f}s")
 
 

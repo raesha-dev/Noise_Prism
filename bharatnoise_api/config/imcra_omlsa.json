@@ -1,0 +1,22 @@
+{
+  "fitted": false,
+  "note": "Experimental simplified adaptive spectral gain with VAD-gated non-speech attenuation and speech leveling; cited-paper fidelity is unverified. Voice-focus and spectral parameters are unfitted placeholders. Validate and tune on development data only.",
+  "window": 256,
+  "hop": 64,
+  "smoothing_alpha": 0.8,
+  "noise_alpha": 0.98,
+  "minimum_window_frames": 80,
+  "minimum_update_frames": 8,
+  "stage1_threshold": 2.0,
+  "stage2_threshold": 1.5,
+  "presence_transition": 0.25,
+  "decision_direct_alpha": 0.98,
+  "gain_floor": 0.05,
+  "gain_smoothing": 0.2,
+  "speech_level_target_dbfs": -22.0,
+  "speech_gain_max": 8.0,
+  "noise_gate_gain": 0.25,
+  "oa_lambda": 0.1,
+  "oa_sweep": [0.0, 0.05, 0.1, 0.2, 0.3, 0.4],
+  "peak_limit": 0.99
+}

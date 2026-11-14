@@ -3,6 +3,7 @@ import {
   buildProcessForm,
   checkApiConnection,
   DEFAULT_API_BASE_URL,
+  fetchCandidateConfig,
   getApiBaseUrl,
   makeLiveSocketUrl,
   normalizeBaseUrl,
@@ -29,11 +30,13 @@ describe("proxy address", () => {
 });
 
 describe("POST /process request", () => {
-  it("sends 8 kHz mono PCM16 to Gnani Prisma with one SNR-routed call in Fast mode", () => {
+  it("sends 8 kHz mono PCM16 for one selected provider call in Fast mode", () => {
     const form = buildProcessForm(new Blob(["x"]), "a.wav", {
       mode: "fast",
       candidates: ["C0", "C1", "C2"],
       asrModel: "prisma-v2.5",
+      outputFormat: "auto",
+      languageCode: "hi-IN",
       compareModels: true,
     });
     expect(form.get("sample_rate")).toBe("8000");
@@ -43,17 +46,70 @@ describe("POST /process request", () => {
     expect(form.get("selection")).toBe("snr_router");
     expect(form.get("compare_models")).toBe("false");
     expect(form.get("candidates")).toBe("C0,C1,C2");
+    expect(form.get("language_code")).toBe("hi-IN");
+    expect(form.has("format")).toBe(false);
   });
   it("uses consensus and optional model comparison in Max mode", () => {
     const form = buildProcessForm(new Blob(["x"]), "a.wav", {
       mode: "max",
       candidates: ["C0", "C1", "C2", "C3"],
       asrModel: "prisma-v3.0",
+      outputFormat: "codemix",
+      languageCode: "indic-auto",
       compareModels: true,
     });
     expect(form.get("selection")).toBe("consensus");
     expect(form.get("compare_models")).toBe("true");
     expect(form.get("asr_model")).toBe("prisma-v3.0");
+    expect(form.get("format")).toBe("codemix");
+    expect(form.get("language_code")).toBe("indic-auto");
+  });
+  it("sends the selected Observation Addition coefficient", () => {
+    const form = buildProcessForm(new Blob(["x"]), "a.wav", {
+      mode: "max",
+      candidates: ["C0", "C2B", "C2C"],
+      asrModel: "prisma-v3.0",
+      outputFormat: "codemix",
+      languageCode: "indic-auto",
+      compareModels: false,
+      oaLambda: 0.3,
+    });
+    expect(form.get("oa_lambda")).toBe("0.3");
+    expect(form.get("candidates")).toBe("C0,C2B,C2C");
+  });
+});
+
+describe("GET /api/config response", () => {
+  it("uses the backend-owned OA sweep and fitted flag", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            imcra_omlsa: { fitted: false, oa_lambda: 0.1, oa_sweep: [0, 0.1, 0.3] },
+          }),
+          { headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+    await expect(fetchCandidateConfig("http://localhost:8000")).resolves.toEqual({
+      fitted: false,
+      oaLambda: 0.1,
+      oaSweep: [0, 0.1, 0.3],
+    });
+  });
+  it("rejects malformed candidate configuration", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ imcra_omlsa: { fitted: false } }), {
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    await expect(fetchCandidateConfig("http://localhost:8000")).rejects.toThrow(
+      /GET \/api\/config response does not match/,
+    );
   });
 });
 
@@ -101,6 +157,10 @@ describe("POST /process response", () => {
       {
         request_id: "mock-request",
         gnani_mode: "mock",
+        output_format: "codemix",
+        language_code: "indic-auto",
+        detected_language_code: "hi-IN",
+        unavailable_candidates: { C3: "DeepFilterNet dependency is unavailable." },
         score_suppressed_reason: "mock",
         selected_candidate: "C2",
         transcription: "[MOCK] enhanced fixture",
@@ -112,6 +172,20 @@ describe("POST /process response", () => {
             guard_score: null,
             confidence: null,
             snr_db: null,
+            error: null,
+            truncated: false,
+            parameters: null,
+          },
+          C1: {
+            transcript: "",
+            audio_url: "/api/clips/mock/C1",
+            peaks: [],
+            guard_score: null,
+            confidence: null,
+            snr_db: null,
+            error: "HTTP 400 BAD_REQUEST",
+            truncated: false,
+            parameters: null,
           },
           C2: {
             transcript: "[MOCK] enhanced fixture",
@@ -120,10 +194,13 @@ describe("POST /process response", () => {
             guard_score: null,
             confidence: null,
             snr_db: null,
+            error: null,
+            truncated: true,
+            parameters: { observation_addition_lambda: 0.3 },
           },
         },
         analysis: {
-          snr_db: null,
+          stationary_snr_db_est: null,
           noise_floor_db: null,
           speech_energy_db: null,
           vad_segments: [],
@@ -146,9 +223,67 @@ describe("POST /process response", () => {
       "https://api.example.com",
     );
     expect(result.selectedCandidate).toBe("C2");
+    expect(result.analysis.snrDb).toBeUndefined();
+    expect(result.outputFormat).toBe("codemix");
+    expect(result.languageCode).toBe("indic-auto");
+    expect(result.detectedLanguageCode).toBe("hi-IN");
     expect(result.candidates.C0?.transcript).toBe("[MOCK] original fixture");
     expect(result.candidates.C2?.audioUrl).toBe("https://api.example.com/api/clips/mock/C2");
+    expect(result.candidates.C1?.transcript).toBe("");
+    expect(result.candidates.C1?.error).toBe("HTTP 400 BAD_REQUEST");
+    expect(result.candidates.C2?.truncated).toBe(true);
+    expect(result.candidates.C2?.parameters?.["observation_addition_lambda"]).toBe(0.3);
     expect(result.transcription).toBe("[MOCK] enhanced fixture");
+    expect(result.unavailableCandidates?.C3).toBe("DeepFilterNet dependency is unavailable.");
+  });
+
+  it("normalizes the legacy analysis.snr_db field", () => {
+    const raw = {
+      request_id: "legacy-request",
+      gnani_mode: "mock",
+      output_format: "verbatim",
+      language_code: "hi-IN",
+      detected_language_code: null,
+      unavailable_candidates: {},
+      score_suppressed_reason: null,
+      selected_candidate: "C0",
+      transcription: "[MOCK] legacy fixture",
+      candidates: {
+        C0: {
+          transcript: "[MOCK] legacy fixture",
+          audio_url: null,
+          peaks: [],
+          guard_score: null,
+          confidence: null,
+          snr_db: null,
+          error: null,
+          truncated: false,
+          parameters: null,
+        },
+      },
+      analysis: {
+        snr_db: 8.5,
+        noise_floor_db: null,
+        speech_energy_db: null,
+        vad_segments: [],
+        guard_status: null,
+        guard_result: null,
+        spectrum: [],
+      },
+      evaluation: {
+        wer: null,
+        cer: null,
+        latency_ms: null,
+        calls: null,
+        note: "Mock scores are suppressed.",
+      },
+      pipeline: ["mock"],
+      latency_ms: 12,
+      router_fitted: false,
+      suppression_fitted: false,
+    };
+
+    expect(normalizeProcessingResult(raw).analysis.snrDb).toBe(8.5);
   });
   it("rejects missing and malformed response fields with a readable error", () => {
     expect(() => normalizeProcessingResult({ status: "ok" })).toThrow(
@@ -158,6 +293,10 @@ describe("POST /process response", () => {
       normalizeProcessingResult({
         request_id: "id",
         gnani_mode: "mock",
+        output_format: "verbatim",
+        language_code: "hi-IN",
+        detected_language_code: null,
+        unavailable_candidates: {},
         score_suppressed_reason: "mock",
         selected_candidate: "C9",
         transcription: "",
