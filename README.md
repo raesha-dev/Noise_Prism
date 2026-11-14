@@ -8,7 +8,7 @@ BEFORE YOU PUBLISH (delete this block):
 5. Rename this file to README.md in the repo root.
 -->
 
-# BharatNoise
+# BharatVoice
 
 **An ASR-aware front-end for noisy Indian telephone audio, built on Gnani Prisma, with an honest measurement of what pre-processing actually does to transcription accuracy.**
 
