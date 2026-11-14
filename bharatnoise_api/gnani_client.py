@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 import requests
 
 API_URL = "https://api.vachana.ai/stt/v3"
+TTS_API_URL = "https://api.vachana.ai/api/v1/tts/inference"
 OFFICIAL_HOST = "api.vachana.ai"
 
 
@@ -24,6 +25,14 @@ def api_endpoint(base_url: str | None = None) -> str:
     if base.endswith("/stt/v3"):
         return base
     return f"{base}/stt/v3"
+
+
+def tts_api_endpoint(base_url: str | None = None) -> str:
+    """Resolve Gnani Timbre REST URL from the configured API origin."""
+    base = (base_url or os.environ.get("GNANI_BASE_URL", "https://api.vachana.ai")).rstrip("/")
+    if base.endswith("/stt/v3"):
+        base = base[: -len("/stt/v3")]
+    return f"{base}/api/v1/tts/inference"
 
 
 def endpoint_mode(base_url: str | None = None, api_key: str | None = None) -> str:
@@ -66,6 +75,7 @@ class GnaniClient:
         if not self._api_key:
             raise FatalAPIError("GNANI_API_KEY is not configured.")
         self.api_url = api_endpoint()
+        self.tts_api_url = tts_api_endpoint()
         self.cache_dir = Path(cache_dir) if cache_dir is not None else None
         if self.cache_dir is not None:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -73,16 +83,16 @@ class GnaniClient:
         self.retries = retries
         self._request_lock = threading.Lock()
 
-    def _cache_path(self, audio_path: Path, language: str, model: str, fmt: str, run_id: Any) -> Path | None:
+    def _cache_path(self, audio_path: Path, language: str, model: str, fmt: str | None, run_id: Any) -> Path | None:
         if self.cache_dir is None:
             return None
         digest = hashlib.sha256(audio_path.read_bytes()).hexdigest()
-        identity = "\0".join((digest, model, language, fmt, str(run_id)))
+        identity = "\0".join((digest, model, language, fmt or "auto", str(run_id)))
         return self.cache_dir / f"{hashlib.sha256(identity.encode()).hexdigest()}.json"
 
     def transcribe(
         self, path: str | Path, language: str, *, model: str = "v2.5",
-        fmt: str = "verbatim", run_id: Any = 0, extra: dict[str, str] | None = None,
+        fmt: str | None = "verbatim", run_id: Any = 0, extra: dict[str, str] | None = None,
         use_cache: bool = True,
     ) -> Transcript:
         """Transcribe one clip; the lock enforces the account's single-active-call limit."""
@@ -102,7 +112,11 @@ class GnaniClient:
                             self.api_url,
                             headers={"X-API-Key-ID": self._api_key, **(extra or {})},
                             files={"audio_file": (audio_path.name, audio_file, "audio/wav")},
-                            data={"language_code": language, "model": prisma_model, "format": fmt},
+                            data={
+                                "language_code": language,
+                                "model": prisma_model,
+                                **({"format": fmt} if fmt is not None else {}),
+                            },
                             timeout=self.timeout_s,
                         )
                 except requests.RequestException as exc:
@@ -141,6 +155,52 @@ class GnaniClient:
                     cache_path.write_text(json.dumps(asdict(result), ensure_ascii=False), encoding="utf-8")
                 return result
         raise RuntimeError("The Gnani retry loop ended unexpectedly.")
+
+    def synthesize(
+        self, text: str, *, language: str = "auto",
+    ) -> tuple[bytes, str]:
+        """Return full Timbre audio while sharing the serial lock used for Prisma calls."""
+        payload = {
+            "text": text,
+            "voice": "Shivani",
+            "model": "timbre-v3.0",
+            "language": language,
+            "speed": 1.0,
+            "audio_config": {
+                "sample_rate": 24000,
+                "num_channels": 1,
+                "sample_width": 2,
+                "encoding": "linear_pcm",
+                "container": "wav",
+            },
+        }
+        with self._request_lock:
+            for attempt in range(self.retries + 1):
+                try:
+                    response = requests.post(
+                        self.tts_api_url,
+                        headers={"X-API-Key-ID": self._api_key},
+                        json=payload,
+                        timeout=self.timeout_s,
+                    )
+                except requests.RequestException as exc:
+                    if attempt < self.retries:
+                        time.sleep(min(8.0, 0.25 * (2**attempt)) * random.uniform(0.75, 1.25))
+                        continue
+                    raise RuntimeError(f"GNANI_TTS_NETWORK_ERROR: {type(exc).__name__}") from exc
+                if response.status_code in {401, 402, 403}:
+                    raise FatalAPIError(f"HTTP {response.status_code} GNANI_TTS_ACCESS_DENIED")
+                if response.status_code == 429 or response.status_code >= 500:
+                    if attempt < self.retries:
+                        time.sleep(min(8.0, 0.25 * (2**attempt)) * random.uniform(0.75, 1.25))
+                        continue
+                if not response.ok:
+                    raise RuntimeError(f"GNANI_TTS_HTTP_ERROR: HTTP {response.status_code}")
+                content_type = response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
+                if content_type not in {"audio/wav", "audio/x-wav"} or not response.content:
+                    raise RuntimeError("GNANI_TTS_INVALID_RESPONSE: Expected non-empty WAV audio.")
+                return response.content, "audio/wav"
+        raise RuntimeError("The Gnani TTS retry loop ended unexpectedly.")
 
 
 def _number(value: Any) -> float | None:
