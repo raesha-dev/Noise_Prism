@@ -82,13 +82,13 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "BharatNoise | AI Audio Workstation" },
+      { title: "BharatVoice | AI Audio Workstation" },
       {
         name: "description",
         content:
           "Adaptive speech enhancement workstation for Indian telephony ASR with Gnani AI Prisma.",
       },
-      { property: "og:title", content: "BharatNoise | AI Audio Workstation" },
+      { property: "og:title", content: "BharatVoice | AI Audio Workstation" },
       {
         property: "og:description",
         content:

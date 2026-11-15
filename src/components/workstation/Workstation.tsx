@@ -761,7 +761,7 @@ export function Workstation() {
             <AudioLines size={22} strokeWidth={2.3} />
           </div>
           <span className="brand-name">
-            Bharat<span>Noise</span>
+            Bharat<span>Voice</span>
           </span>
         </div>
         <div className="top-title">
@@ -834,7 +834,7 @@ export function Workstation() {
             aria-label="Configure audio service connection"
           >
             <span className="service-brand">
-              <AudioLines size={17} /> BharatNoise
+              <AudioLines size={17} /> BharatVoice
             </span>
             <span>Telephony · 8 kHz · PCM16</span>
             <span>Multi-pipeline · Gnani Prisma</span>
@@ -1000,7 +1000,7 @@ export function Workstation() {
           />
 
           <footer className="workspace-footer">
-            <span>BharatNoise · Audio workstation</span>
+            <span>BharatVoice · Audio workstation</span>
             <span>
               {resultSource === "service"
                 ? "Showing a service response"

@@ -4,13 +4,13 @@ import { Workstation } from "@/components/workstation/Workstation";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "BharatNoise | AI Audio Workstation" },
+      { title: "BharatVoice | AI Audio Workstation" },
       {
         name: "description",
         content:
           "Audio workspace for noisy Indian telephony speech: compare C0–C3 enhancement candidates, speech analysis, and Gnani Prisma transcripts.",
       },
-      { property: "og:title", content: "BharatNoise | AI Audio Workstation" },
+      { property: "og:title", content: "BharatVoice | AI Audio Workstation" },
       {
         property: "og:description",
         content:
